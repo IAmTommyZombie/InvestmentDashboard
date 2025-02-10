@@ -1,0 +1,41 @@
+exports.FALLBACK_PRICES = {
+  // WEEKLY
+  YMAG: { price: 15.0, distribution: 0.26 },
+  YMAX: { price: 15.5, distribution: 0.26 },
+  LFGY: { price: 14.75, distribution: 0.26 },
+  GPTY: { price: 15.25, distribution: 0.26 },
+  // GROUP A
+  TSLY: { price: 15.5, distribution: 0.85 },
+  GOOY: { price: 15.75, distribution: 0.95 },
+  YBIT: { price: 16.0, distribution: 0.88 },
+  OARK: { price: 15.25, distribution: 0.92 },
+  XOMO: { price: 15.5, distribution: 0.83 },
+  TSMY: { price: 15.75, distribution: 0.9 },
+  CRSH: { price: 15.25, distribution: 0.87 },
+  FIVY: { price: 15.5, distribution: 0.89 },
+  FEAT: { price: 15.75, distribution: 0.91 },
+  // GROUP B
+  NVDY: { price: 15.25, distribution: 0.86 },
+  FBY: { price: 15.5, distribution: 0.84 },
+  GDXY: { price: 15.75, distribution: 0.88 },
+  JPMO: { price: 15.25, distribution: 0.85 },
+  MRNY: { price: 15.5, distribution: 0.93 },
+  MARO: { price: 15.75, distribution: 0.94 },
+  PLTY: { price: 15.25, distribution: 0.94 },
+  // GROUP C
+  CONY: { price: 15.5, distribution: 0.94 },
+  MSFO: { price: 15.75, distribution: 0.94 },
+  AMDY: { price: 15.25, distribution: 0.94 },
+  NFLY: { price: 15.5, distribution: 0.94 },
+  PYPY: { price: 15.75, distribution: 0.94 },
+  ULTY: { price: 15.25, distribution: 0.94 },
+  ABNY: { price: 15.5, distribution: 0.94 },
+  // GROUP D
+  MSTY: { price: 15.75, distribution: 0.94 },
+  AMZY: { price: 15.25, distribution: 0.94 },
+  APLY: { price: 15.5, distribution: 0.94 },
+  DISO: { price: 15.75, distribution: 0.94 },
+  SQY: { price: 15.25, distribution: 0.94 },
+  SMCY: { price: 15.5, distribution: 0.94 },
+  AIYY: { price: 15.75, distribution: 0.94 },
+};
