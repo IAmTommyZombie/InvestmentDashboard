@@ -91,6 +91,15 @@ const DashboardLayout = () => {
 
   const monthlyDistribution = calculateMonthlyDistribution();
 
+  // Format today's date
+  const today = new Date();
+  const formattedDate = today.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
   const renderCurrentView = () => {
     switch (currentView) {
       case "overview":
@@ -177,10 +186,7 @@ const DashboardLayout = () => {
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-white">
-                <span className="text-sm">Avg Monthly Income: </span>
-                <span className="font-medium">
-                  ${monthlyDistribution.toFixed(2)}
-                </span>
+                <span className="text-sm">{formattedDate}</span>
               </div>
               <button
                 onClick={() => setShowAddETFModal(true)}

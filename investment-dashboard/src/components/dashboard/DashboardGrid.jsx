@@ -135,8 +135,7 @@ const DashboardGrid = () => {
   // Function to get the distribution based on today's date
   const getTodaysDistribution = (ticker) => {
     const distribution = getDistribution(ticker, currentYear, currentMonth);
-    // Return "TBD" if the distribution is explicitly 0
-    return distribution === 0 ? "TBD" : distribution;
+    return distribution || "TBD";
   };
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { usePortfolio } from "../../context/PortfolioContext";
 import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
@@ -118,6 +118,10 @@ const PortfolioView = () => {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [prices, setPrices] = useState({});
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: "asc",
+  });
 
   const filteredEtfs = etfs.filter((etf) =>
     etf.ticker.toLowerCase().includes(searchQuery.toLowerCase())
@@ -406,6 +410,182 @@ const PortfolioView = () => {
     return Array.from(uniqueETFs.values());
   };
 
+  const sortData = useCallback(
+    (etfs, key, monthNum) => {
+      return [...etfs].sort((a, b) => {
+        let aValue, bValue;
+
+        switch (key) {
+          case "group":
+            aValue = getETFDetails(a.ticker).group;
+            bValue = getETFDetails(b.ticker).group;
+            break;
+          case "shares":
+            aValue = Number(a.totalShares);
+            bValue = Number(b.totalShares);
+            break;
+          case "value":
+            aValue = a.totalShares * prices[a.ticker.toUpperCase()] || 0;
+            bValue = b.totalShares * prices[b.ticker.toUpperCase()] || 0;
+            break;
+          case "monthlyIncome":
+            const aIncome = calculateMonthlyIncome(a, selectedYear, monthNum);
+            const bIncome = calculateMonthlyIncome(b, selectedYear, monthNum);
+            aValue = aIncome === "TBD" ? -1 : aIncome;
+            bValue = bIncome === "TBD" ? -1 : bIncome;
+            break;
+          default:
+            return 0;
+        }
+
+        if (sortConfig.direction === "asc") {
+          return aValue > bValue ? 1 : -1;
+        } else {
+          return aValue < bValue ? 1 : -1;
+        }
+      });
+    },
+    [sortConfig.direction, selectedYear, prices]
+  );
+
+  const handleSort = useCallback((key, monthNum) => {
+    setSortConfig((prevConfig) => ({
+      key,
+      direction:
+        prevConfig.key === key && prevConfig.direction === "asc"
+          ? "desc"
+          : "asc",
+    }));
+  }, []);
+
+  const getSortIcon = useCallback(
+    (key) => {
+      if (sortConfig.key !== key) return "↕️";
+      return sortConfig.direction === "asc" ? "↑" : "↓";
+    },
+    [sortConfig.key, sortConfig.direction]
+  );
+
+  const calculateBreakEven = (etf) => {
+    console.log("-------------------");
+    console.log(`Calculating break-even for: ${etf.ticker}`);
+
+    const currentPrice = prices[etf.ticker.toUpperCase()];
+    const totalValue = etf.totalShares * currentPrice;
+    console.log("Total Value:", totalValue);
+
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1;
+    const currentYear = today.getFullYear();
+
+    // Calculate multiplier based on ETF type
+    let multiplier = 1;
+    if (["YMAG", "YMAX", "LFGY", "GPTY"].includes(etf.ticker.toUpperCase())) {
+      multiplier = 52 / 12; // Weekly
+    } else if (etf.group && etf.group.startsWith("GROUP_")) {
+      multiplier = 13 / 12; // 13x per year
+    }
+    console.log("Distribution multiplier:", multiplier);
+
+    // Get latest valid distribution
+    let latestDistribution = null;
+    for (let year = currentYear; year >= 2024; year--) {
+      for (
+        let month = year === currentYear ? currentMonth : 12;
+        month >= 1;
+        month--
+      ) {
+        const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
+        if (dist && dist !== "TBD" && typeof dist === "number") {
+          latestDistribution = dist;
+          break;
+        }
+      }
+      if (latestDistribution) break;
+    }
+
+    console.log("Latest valid distribution:", latestDistribution);
+
+    if (!latestDistribution) {
+      console.log("No valid distribution found, returning TBD");
+      return "TBD";
+    }
+
+    let totalDistributionsReceived = 0;
+
+    if (etf.purchases && etf.purchases.length > 0) {
+      console.log("Processing purchases:", etf.purchases);
+
+      totalDistributionsReceived = etf.purchases.reduce((total, purchase) => {
+        const purchaseDate = new Date(purchase.date);
+        let purchaseTotal = 0;
+
+        // Calculate for each month since purchase
+        for (
+          let year = purchaseDate.getFullYear();
+          year <= currentYear;
+          year++
+        ) {
+          const startMonth =
+            year === purchaseDate.getFullYear()
+              ? purchaseDate.getMonth() + 1
+              : 1;
+          const endMonth = year === currentYear ? currentMonth : 12;
+
+          for (let month = startMonth; month <= endMonth; month++) {
+            const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
+            if (dist && dist !== "TBD" && typeof dist === "number") {
+              purchaseTotal += dist * purchase.shares * multiplier;
+            }
+          }
+        }
+
+        console.log(`Purchase total distributions: ${purchaseTotal}`);
+        return total + purchaseTotal;
+      }, 0);
+    } else if (etf.purchaseDate) {
+      const purchaseDate = new Date(etf.purchaseDate);
+
+      // Calculate for each month since purchase
+      for (let year = purchaseDate.getFullYear(); year <= currentYear; year++) {
+        const startMonth =
+          year === purchaseDate.getFullYear() ? purchaseDate.getMonth() + 1 : 1;
+        const endMonth = year === currentYear ? currentMonth : 12;
+
+        for (let month = startMonth; month <= endMonth; month++) {
+          const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
+          if (dist && dist !== "TBD" && typeof dist === "number") {
+            totalDistributionsReceived += dist * etf.totalShares * multiplier;
+          }
+        }
+      }
+    }
+
+    console.log("Total distributions received:", totalDistributionsReceived);
+
+    // Calculate monthly income for break-even using latest distribution
+    const monthlyIncome = latestDistribution * etf.totalShares * multiplier;
+    console.log("Monthly income:", monthlyIncome);
+
+    if (monthlyIncome === 0 || !isFinite(monthlyIncome)) {
+      console.log("Invalid monthly income, returning TBD");
+      return "TBD";
+    }
+
+    const remainingValue = totalValue - totalDistributionsReceived;
+    const monthsToBreakEven = remainingValue / monthlyIncome;
+
+    console.log("Remaining value:", remainingValue);
+    console.log("Months to break even:", monthsToBreakEven);
+
+    return {
+      totalInvestment: totalValue,
+      totalDistributions: totalDistributionsReceived,
+      months: monthsToBreakEven,
+      years: monthsToBreakEven / 12,
+    };
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -419,7 +599,7 @@ const PortfolioView = () => {
         </div>
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Monthly Income
+            Total Distributions
           </h3>
           <p className="text-2xl font-semibold">
             ${stats.monthlyIncome.toLocaleString()}
@@ -462,6 +642,9 @@ const PortfolioView = () => {
                   Next Distribution
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Break Even
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Delete
                 </th>
               </tr>
@@ -470,6 +653,7 @@ const PortfolioView = () => {
               {getUniqueETFs().map((etf) => {
                 const currentPrice = prices[etf.ticker.toUpperCase()];
                 const totalValue = etf.totalShares * currentPrice;
+                const breakEven = calculateBreakEven(etf);
 
                 return (
                   <tr key={etf._id} className={getGroupStyle(etf.group)}>
@@ -513,6 +697,41 @@ const PortfolioView = () => {
                           }
                         )}{" "}
                         (${etf.nextDividendAmount})
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {breakEven === "TBD" ? (
+                          "TBD"
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="text-xs text-gray-500">
+                              Investment: $
+                              {breakEven.totalInvestment.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                }
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Received: $
+                              {breakEven.totalDistributions.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                }
+                              )}
+                            </div>
+                            <div className="text-xs text-green-600">
+                              {breakEven.years < 1
+                                ? `${Math.ceil(breakEven.months)} months`
+                                : `${breakEven.years.toFixed(1)} years`}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -559,9 +778,12 @@ const PortfolioView = () => {
       {monthlyGroups.map(({ month, etfs }, index) => {
         const monthNum =
           new Date(Date.parse(month + " 1, 2000")).getMonth() + 1;
+        const sortedEtfs = sortConfig.key
+          ? sortData(etfs, sortConfig.key, monthNum)
+          : etfs;
 
         // Calculate total monthly income
-        const monthlyIncomes = etfs.map((etf) =>
+        const monthlyIncomes = sortedEtfs.map((etf) =>
           calculateMonthlyIncome(etf, selectedYear, monthNum)
         );
         const currentMonthIncome = monthlyIncomes.reduce((total, income) => {
@@ -570,14 +792,14 @@ const PortfolioView = () => {
         }, 0);
 
         // Calculate total value
-        const currentMonthTotalValue = etfs.reduce((total, etf) => {
+        const currentMonthTotalValue = sortedEtfs.reduce((total, etf) => {
           const currentPrice = prices[etf.ticker.toUpperCase()];
           const value = etf.totalShares * currentPrice;
           return total + (value || 0);
         }, 0);
 
         // Check if we're using any previous month values
-        const usingPreviousMonth = etfs.some((etf) => {
+        const usingPreviousMonth = sortedEtfs.some((etf) => {
           const currentDist = getDistribution(
             etf.ticker.toUpperCase(),
             selectedYear,
@@ -588,138 +810,151 @@ const PortfolioView = () => {
 
         return (
           <div key={month} className="bg-white rounded-lg shadow-sm mb-6">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium">
-                {month} {selectedYear}
-              </h3>
+            <div className="bg-gray-50 px-6 py-3 border-b">
+              <h3 className="text-lg font-medium text-gray-900">{month}</h3>
             </div>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("group", monthNum)}
+                  >
+                    ETF {getSortIcon("group")}
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("shares", monthNum)}
+                  >
+                    Group {getSortIcon("shares")}
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("value", monthNum)}
+                  >
+                    # of Shares {getSortIcon("value")}
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("monthlyIncome", monthNum)}
+                  >
+                    Value {getSortIcon("monthlyIncome")}
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("monthlyIncome", monthNum)}
+                  >
+                    Distribution {getSortIcon("monthlyIncome")}
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSort("monthlyIncome", monthNum)}
+                  >
+                    Monthly Income {getSortIcon("monthlyIncome")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {sortedEtfs.map((etf) => {
+                  const { group } = getETFDetails(etf.ticker);
+                  const distribution = getMonthlyDistribution(
+                    etf.ticker.toUpperCase(),
+                    selectedYear,
+                    monthNum
+                  );
+                  const monthlyIncome = calculateMonthlyIncome(
+                    etf,
+                    selectedYear,
+                    monthNum
+                  );
+                  const currentPrice = prices[etf.ticker.toUpperCase()];
+                  const totalValue = etf.totalShares * currentPrice;
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      ETF
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Group
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Shares
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Value
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Distribution Amount
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Monthly Income
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {etfs.map((etf) => {
-                    const { group } = getETFDetails(etf.ticker);
-                    const distribution = getMonthlyDistribution(
-                      etf.ticker.toUpperCase(),
-                      selectedYear,
-                      monthNum
-                    );
-                    const monthlyIncome = calculateMonthlyIncome(
-                      etf,
-                      selectedYear,
-                      monthNum
-                    );
-                    const currentPrice = prices[etf.ticker.toUpperCase()];
-                    const totalValue = etf.totalShares * currentPrice;
+                  // Check if this ETF is using previous month's value
+                  const isUsingPrevMonth = !getDistribution(
+                    etf.ticker.toUpperCase(),
+                    selectedYear,
+                    monthNum
+                  );
 
-                    // Check if this ETF is using previous month's value
-                    const isUsingPrevMonth = !getDistribution(
-                      etf.ticker.toUpperCase(),
-                      selectedYear,
-                      monthNum
-                    );
-
-                    return (
-                      <tr key={etf._id} className={getGroupStyle(group)}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
-                            {etf.ticker}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {formatGroupName(group)}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {etf.totalShares}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            $
-                            {totalValue?.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }) || "N/A"}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {distribution === "TBD"
-                              ? "TBD"
-                              : `$${distribution.toFixed(2)}${
-                                  isUsingPrevMonth ? "*" : ""
-                                }`}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-green-600 font-medium">
-                            {monthlyIncome === "TBD"
-                              ? "TBD"
-                              : `$${monthlyIncome.toFixed(2)}${
-                                  isUsingPrevMonth ? "*" : ""
-                                }`}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="bg-gray-50 font-medium">
-                    <td
-                      colSpan="3"
-                      className="px-6 py-4 text-right text-sm text-gray-900"
-                    >
-                      Total Value:
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900 font-medium">
-                        $
-                        {currentMonthTotalValue.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </div>
-                    </td>
-                    <td
-                      colSpan="1"
-                      className="px-6 py-4 text-right text-sm text-gray-900"
-                    >
-                      Total:
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-green-600 font-medium">
-                        ${currentMonthIncome.toFixed(2)}
-                        {usingPreviousMonth ? "*" : ""}
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                  return (
+                    <tr key={etf._id} className={getGroupStyle(group)}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {etf.ticker}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {formatGroupName(group)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {etf.totalShares}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          $
+                          {totalValue?.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }) || "N/A"}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {distribution === "TBD"
+                            ? "TBD"
+                            : `$${distribution.toFixed(2)}${
+                                isUsingPrevMonth ? "*" : ""
+                              }`}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-green-600 font-medium">
+                          {monthlyIncome === "TBD"
+                            ? "TBD"
+                            : `$${monthlyIncome.toFixed(2)}${
+                                isUsingPrevMonth ? "*" : ""
+                              }`}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-gray-50 font-medium">
+                  <td
+                    colSpan="3"
+                    className="px-6 py-4 text-right text-sm text-gray-900"
+                  >
+                    Total Value:
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900 font-medium">
+                      $
+                      {currentMonthTotalValue.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+                  </td>
+                  <td
+                    colSpan="1"
+                    className="px-6 py-4 text-right text-sm text-gray-900"
+                  >
+                    Total:
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-green-600 font-medium">
+                      ${currentMonthIncome.toFixed(2)}
+                      {usingPreviousMonth ? "*" : ""}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         );
       })}
