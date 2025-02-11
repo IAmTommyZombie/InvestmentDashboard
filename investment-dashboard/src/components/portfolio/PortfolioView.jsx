@@ -15,7 +15,10 @@ import {
 import AddETFForm from "./AddETFForm";
 import { DISTRIBUTIONS } from "../../data/distributions";
 import axios from "axios";
-import { getDistribution } from "../../data/distributions";
+import {
+  getDistribution,
+  getFrequencyMultiplier,
+} from "../../data/distributions";
 
 const getGroupStyle = (group) => {
   switch (group) {
@@ -396,13 +399,29 @@ const PortfolioView = () => {
           .filter((e) => e.ticker === ticker)
           .reduce((sum, e) => sum + Number(e.shares), 0);
 
+        // Default purchase date if none exists
+        const defaultPurchaseDate = "2025-01-01";
+
         uniqueETFs.set(ticker, {
           _id: etf._id,
           ticker: ticker,
           group,
           totalShares: totalShares,
           currentPrice: prices[ticker.toUpperCase()],
-          nextDividendAmount: DISTRIBUTIONS[ticker.toUpperCase()] || 0,
+          nextDividendAmount:
+            getDistribution(
+              ticker.toUpperCase(),
+              selectedYear,
+              selectedMonth
+            ) || 0,
+          purchaseDate: etf.purchaseDate || defaultPurchaseDate, // Add default purchase date
+          purchases: etf.purchases || [
+            {
+              date: defaultPurchaseDate,
+              shares: totalShares,
+              price: prices[ticker.toUpperCase()] || 0,
+            },
+          ],
         });
       }
     });
@@ -467,25 +486,29 @@ const PortfolioView = () => {
   );
 
   const calculateBreakEven = (etf) => {
-    console.log("-------------------");
-    console.log(`Calculating break-even for: ${etf.ticker}`);
+    console.log("===================");
+    console.log(`DEBUG: Calculating break-even for ${etf.ticker}`);
+    console.log("ETF Data:", etf);
 
     const currentPrice = prices[etf.ticker.toUpperCase()];
     const totalValue = etf.totalShares * currentPrice;
+    console.log("Current Price:", currentPrice);
     console.log("Total Value:", totalValue);
 
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
+    console.log("Current Date:", `${currentYear}-${currentMonth}`);
 
-    // Calculate multiplier based on ETF type
-    let multiplier = 1;
-    if (["YMAG", "YMAX", "LFGY", "GPTY"].includes(etf.ticker.toUpperCase())) {
-      multiplier = 52 / 12; // Weekly
-    } else if (etf.group && etf.group.startsWith("GROUP_")) {
-      multiplier = 13 / 12; // 13x per year
-    }
+    // Use new frequency multiplier helper
+    const multiplier = getFrequencyMultiplier(etf.ticker.toUpperCase());
     console.log("Distribution multiplier:", multiplier);
+
+    // Debug: Check what distributions are available
+    console.log(
+      "Available distributions for ticker:",
+      DISTRIBUTIONS[etf.ticker.toUpperCase()]
+    );
 
     // Get latest valid distribution
     let latestDistribution = null;
@@ -496,6 +519,7 @@ const PortfolioView = () => {
         month--
       ) {
         const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
+        console.log(`Checking distribution for ${year}-${month}:`, dist);
         if (dist && dist !== "TBD" && typeof dist === "number") {
           latestDistribution = dist;
           break;
@@ -513,59 +537,114 @@ const PortfolioView = () => {
 
     let totalDistributionsReceived = 0;
 
+    // Debug the purchase data structure
+    console.log("\nPurchase Data Check:");
+    console.log("Has purchases array:", Boolean(etf.purchases));
+    console.log("Purchases:", etf.purchases);
+    console.log("Has purchaseDate:", Boolean(etf.purchaseDate));
+    console.log("Purchase Date:", etf.purchaseDate);
+
     if (etf.purchases && etf.purchases.length > 0) {
-      console.log("Processing purchases:", etf.purchases);
+      console.log("\nProcessing multiple purchases:", etf.purchases);
 
-      totalDistributionsReceived = etf.purchases.reduce((total, purchase) => {
+      etf.purchases.forEach((purchase, index) => {
         const purchaseDate = new Date(purchase.date);
-        let purchaseTotal = 0;
+        let purchaseYear = purchaseDate.getFullYear();
+        let purchaseMonth = purchaseDate.getMonth() + 1;
 
-        // Calculate for each month since purchase
-        for (
-          let year = purchaseDate.getFullYear();
-          year <= currentYear;
-          year++
-        ) {
-          const startMonth =
-            year === purchaseDate.getFullYear()
-              ? purchaseDate.getMonth() + 1
-              : 1;
-          const endMonth = year === currentYear ? currentMonth : 12;
+        console.log(`\nProcessing purchase #${index + 1}:`);
+        console.log("Purchase date:", `${purchaseYear}-${purchaseMonth}`);
+        console.log("Shares:", purchase.shares);
 
-          for (let month = startMonth; month <= endMonth; month++) {
-            const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
-            if (dist && dist !== "TBD" && typeof dist === "number") {
-              purchaseTotal += dist * purchase.shares * multiplier;
-            }
+        // Calculate months between purchase date and today
+        const monthDiff =
+          (currentYear - purchaseYear) * 12 + (currentMonth - purchaseMonth);
+        console.log(`Months since purchase: ${monthDiff}`);
+
+        // For each month since purchase
+        for (let i = 0; i <= monthDiff; i++) {
+          const calcMonth = ((purchaseMonth - 1 + i) % 12) + 1;
+          const calcYear =
+            purchaseYear + Math.floor((purchaseMonth - 1 + i) / 12);
+
+          const dist = getDistribution(
+            etf.ticker.toUpperCase(),
+            calcYear,
+            calcMonth
+          );
+          console.log(
+            `Month ${i}: Checking ${calcYear}-${calcMonth}, distribution: ${dist}`
+          );
+
+          if (dist && dist !== "TBD" && typeof dist === "number") {
+            const monthlyDist = dist * purchase.shares * multiplier;
+            totalDistributionsReceived += monthlyDist;
+            console.log(
+              `Adding distribution: $${monthlyDist.toFixed(2)} (${dist} * ${
+                purchase.shares
+              } * ${multiplier})`
+            );
+          } else {
+            console.log(
+              `Skipping ${calcYear}-${calcMonth}: Invalid distribution value`
+            );
           }
         }
-
-        console.log(`Purchase total distributions: ${purchaseTotal}`);
-        return total + purchaseTotal;
-      }, 0);
+      });
     } else if (etf.purchaseDate) {
+      console.log("\nProcessing single purchase date:", etf.purchaseDate);
       const purchaseDate = new Date(etf.purchaseDate);
+      let purchaseYear = purchaseDate.getFullYear();
+      let purchaseMonth = purchaseDate.getMonth() + 1;
 
-      // Calculate for each month since purchase
-      for (let year = purchaseDate.getFullYear(); year <= currentYear; year++) {
-        const startMonth =
-          year === purchaseDate.getFullYear() ? purchaseDate.getMonth() + 1 : 1;
-        const endMonth = year === currentYear ? currentMonth : 12;
+      // Calculate months between purchase date and today
+      const monthDiff =
+        (currentYear - purchaseYear) * 12 + (currentMonth - purchaseMonth);
+      console.log(`Months since purchase: ${monthDiff}`);
 
-        for (let month = startMonth; month <= endMonth; month++) {
-          const dist = getDistribution(etf.ticker.toUpperCase(), year, month);
-          if (dist && dist !== "TBD" && typeof dist === "number") {
-            totalDistributionsReceived += dist * etf.totalShares * multiplier;
-          }
+      // For each month since purchase
+      for (let i = 0; i <= monthDiff; i++) {
+        const calcMonth = ((purchaseMonth - 1 + i) % 12) + 1;
+        const calcYear =
+          purchaseYear + Math.floor((purchaseMonth - 1 + i) / 12);
+
+        const dist = getDistribution(
+          etf.ticker.toUpperCase(),
+          calcYear,
+          calcMonth
+        );
+        console.log(
+          `Month ${i}: Checking ${calcYear}-${calcMonth}, distribution: ${dist}`
+        );
+
+        if (dist && dist !== "TBD" && typeof dist === "number") {
+          const monthlyDist = dist * etf.totalShares * multiplier;
+          totalDistributionsReceived += monthlyDist;
+          console.log(
+            `Adding distribution: $${monthlyDist.toFixed(2)} (${dist} * ${
+              etf.totalShares
+            } * ${multiplier})`
+          );
+        } else {
+          console.log(
+            `Skipping ${calcYear}-${calcMonth}: Invalid distribution value`
+          );
         }
       }
+    } else {
+      console.log("\nWARNING: No purchase information found!");
     }
 
-    console.log("Total distributions received:", totalDistributionsReceived);
+    console.log("\nFinal Calculations:");
+    console.log(
+      "Total distributions received:",
+      totalDistributionsReceived.toFixed(2)
+    );
+    
 
     // Calculate monthly income for break-even using latest distribution
     const monthlyIncome = latestDistribution * etf.totalShares * multiplier;
-    console.log("Monthly income:", monthlyIncome);
+    console.log("Monthly income:", monthlyIncome.toFixed(2));
 
     if (monthlyIncome === 0 || !isFinite(monthlyIncome)) {
       console.log("Invalid monthly income, returning TBD");
@@ -575,8 +654,8 @@ const PortfolioView = () => {
     const remainingValue = totalValue - totalDistributionsReceived;
     const monthsToBreakEven = remainingValue / monthlyIncome;
 
-    console.log("Remaining value:", remainingValue);
-    console.log("Months to break even:", monthsToBreakEven);
+    console.log("Remaining value:", remainingValue.toFixed(2));
+    console.log("Months to break even:", monthsToBreakEven.toFixed(2));
 
     return {
       totalInvestment: totalValue,
