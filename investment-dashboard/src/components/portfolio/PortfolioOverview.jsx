@@ -27,8 +27,8 @@ const PortfolioOverview = () => {
       (sum, etf) => sum + etf.shares * etf.distribution,
       0
     );
-    const yieldRate =
-      totalValue > 0 ? ((monthlyIncome * 12) / totalValue) * 100 : 0;
+    const yearlyIncome = monthlyIncome * 12;
+    const yieldRate = totalValue > 0 ? (yearlyIncome / totalValue) * 100 : 0;
 
     return {
       totalValue: {
@@ -37,6 +37,10 @@ const PortfolioOverview = () => {
       },
       monthlyIncome: {
         value: monthlyIncome,
+        trend: 0,
+      },
+      yearlyIncome: {
+        value: yearlyIncome,
         trend: 0,
       },
       etfsHeld: {
@@ -99,6 +103,12 @@ const PortfolioOverview = () => {
           iconColor="text-green-600"
           prefix="$"
           trend={portfolioStats.monthlyIncome.trend}
+          subtitle={`Yearly: $${portfolioStats.yearlyIncome.value.toLocaleString(
+            "en-US",
+            {
+              minimumFractionDigits: 2,
+            }
+          )}`}
         />
 
         <StatCard

@@ -1,49 +1,7 @@
 import React, { useState } from "react";
 import { usePortfolio } from "../../context/PortfolioContext";
 import { X } from "lucide-react";
-
-// Mock distribution data - should match your etfService.js
-const DISTRIBUTIONS = {
-  // WEEKLY
-  YMAG: 0.26,
-  YMAX: 0.26,
-  LFGY: 0.26,
-  GPTY: 0.26,
-  // GROUP A
-  TSLY: 0.85,
-  GOOY: 0.95,
-  YBIT: 0.88,
-  OARK: 0.92,
-  XOMO: 0.83,
-  TSMY: 0.9,
-  CRSH: 0.87,
-  FIVY: 0.89,
-  FEAT: 0.91,
-  // GROUP B
-  NVDY: 0.86,
-  FBY: 0.84,
-  GDXY: 0.88,
-  JPMO: 0.85,
-  MRNY: 0.93,
-  MARO: 0.94,
-  PLTY: 0.94,
-  // GROUP C
-  CONY: 0.94,
-  MSFO: 0.94,
-  AMDY: 0.94,
-  NFLY: 0.94,
-  PYPY: 0.94,
-  ULTY: 0.94,
-  ABNY: 0.94,
-  // GROUP D
-  MSTY: 0.94,
-  AMZY: 0.94,
-  APLY: 0.94,
-  DISO: 0.94,
-  SQY: 0.94,
-  SMCY: 0.94,
-  AIYY: 0.94,
-};
+import { DISTRIBUTIONS } from "../../data/distributions";
 
 const AddETFForm = ({ onClose, onSuccess }) => {
   const { addETF, validTickers } = usePortfolio();
@@ -98,7 +56,7 @@ const AddETFForm = ({ onClose, onSuccess }) => {
       costBasis: Number(formData.costBasis),
       currentPrice: Number(formData.currentPrice),
       purchaseDate: formData.purchaseDate,
-      distribution, // Add the distribution data
+      distribution, // This will automatically add the distribution from our mock data
     });
 
     onSuccess?.("ETF added successfully");
@@ -221,6 +179,16 @@ const AddETFForm = ({ onClose, onSuccess }) => {
                 Monthly Distribution: $
                 {DISTRIBUTIONS[formData.ticker.toUpperCase()]?.toFixed(2) ||
                   "0.00"}
+                {formData.shares && (
+                  <span className="ml-2 text-gray-500">
+                    (Total: $
+                    {(
+                      (DISTRIBUTIONS[formData.ticker.toUpperCase()] || 0) *
+                      formData.shares
+                    ).toFixed(2)}
+                    /month)
+                  </span>
+                )}
               </span>
             </div>
           )}

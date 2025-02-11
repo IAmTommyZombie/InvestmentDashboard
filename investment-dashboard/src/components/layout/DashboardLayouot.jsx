@@ -13,8 +13,11 @@ import Notification from "../ui/Notification";
 import DashboardGrid from "../dashboard/DashboardGrid";
 import PortfolioView from "../portfolio/PortfolioView";
 import SettingsView from "../portfolio/SettingsView";
+import { DISTRIBUTIONS } from "../../data/distributions";
+import { usePortfolio } from "../../context/PortfolioContext";
 
 const DashboardLayout = () => {
+  const { etfs } = usePortfolio();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showAddETFModal, setShowAddETFModal] = useState(false);
   const [notification, setNotification] = useState(null);
@@ -25,6 +28,68 @@ const DashboardLayout = () => {
     { name: "Portfolio", view: "portfolio", icon: BarChart3 },
     { name: "Settings", view: "settings", icon: Settings },
   ];
+
+  const getPaymentsPerYear = (ticker) => {
+    // Weekly distributions
+    if (["YMAG", "YMAX", "LFGY", "GPTY"].includes(ticker)) {
+      return 52;
+    }
+    // Groups A, B, C, D (13 payments per year)
+    if (
+      [
+        // Group A
+        "TSLY",
+        "GOOY",
+        "YBIT",
+        "OARK",
+        "XOMO",
+        "TSMY",
+        "CRSH",
+        "FIVY",
+        "FEAT",
+        // Group B
+        "NVDY",
+        "FBY",
+        "GDXY",
+        "JPMO",
+        "MRNY",
+        "MARO",
+        "PLTY",
+        // Group C
+        "CONY",
+        "MSFO",
+        "AMDY",
+        "NFLY",
+        "PYPY",
+        "ULTY",
+        "ABNY",
+        // Group D
+        "MSTY",
+        "AMZY",
+        "APLY",
+        "DISO",
+        "SQY",
+        "SMCY",
+        "AIYY",
+      ].includes(ticker)
+    ) {
+      return 13;
+    }
+    return 12; // Default to monthly payments
+  };
+
+  // Calculate average monthly income (accounting for different payment frequencies)
+  const calculateMonthlyDistribution = () => {
+    return etfs.reduce((total, etf) => {
+      const distribution = DISTRIBUTIONS[etf.ticker.toUpperCase()] || 0;
+      const paymentsPerYear = getPaymentsPerYear(etf.ticker.toUpperCase());
+      const yearlyAmount = distribution * paymentsPerYear;
+      const monthlyAmount = yearlyAmount / 12; // Convert to average monthly amount
+      return total + monthlyAmount * etf.shares;
+    }, 0);
+  };
+
+  const monthlyDistribution = calculateMonthlyDistribution();
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -111,6 +176,12 @@ const DashboardLayout = () => {
               </h2>
             </div>
             <div className="flex items-center space-x-4">
+              <div className="text-white">
+                <span className="text-sm">Avg Monthly Income: </span>
+                <span className="font-medium">
+                  ${monthlyDistribution.toFixed(2)}
+                </span>
+              </div>
               <button
                 onClick={() => setShowAddETFModal(true)}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-white rounded-lg 

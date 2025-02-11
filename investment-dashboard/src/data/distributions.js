@@ -1,0 +1,41 @@
+export const DISTRIBUTIONS = {
+  // WEEKLY
+  YMAG: 0.1,
+  YMAX: 0.26,
+  LFGY: 0.26,
+  GPTY: 0.26,
+  // GROUP A
+  TSLY: 0.85,
+  GOOY: 0.95,
+  YBIT: 0.88,
+  OARK: 0.92,
+  XOMO: 0.83,
+  TSMY: 0.9,
+  CRSH: 0.87,
+  FIVY: 0.89,
+  FEAT: 0.91,
+  // GROUP B
+  NVDY: 0.86,
+  FBY: 0.84,
+  GDXY: 0.88,
+  JPMO: 0.85,
+  MRNY: 0.93,
+  MARO: 0.94,
+  PLTY: 0.94,
+  // GROUP C
+  CONY: 0.94,
+  MSFO: 0.94,
+  AMDY: 0.94,
+  NFLY: 0.94,
+  PYPY: 0.94,
+  ULTY: 0.94,
+  ABNY: 0.94,
+  // GROUP D
+  MSTY: 0.94,
+  AMZY: 0.94,
+  APLY: 0.94,
+  DISO: 0.94,
+  SQY: 0.94,
+  SMCY: 0.94,
+  AIYY: 0.94,
+};

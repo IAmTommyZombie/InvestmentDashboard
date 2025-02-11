@@ -8,6 +8,7 @@ import {
   DollarSign,
   CircleDollarSign,
 } from "lucide-react";
+import { DISTRIBUTIONS } from "../../data/distributions";
 
 const API_URL = "http://localhost:3500/api";
 
@@ -54,40 +55,69 @@ const getSeriesColorClasses = (series) => {
 
 const getNextDistributionDate = (series) => {
   const today = new Date();
+  const currentYear = today.getFullYear();
   const currentMonth = today.getMonth();
-  const currentWeek = Math.ceil(today.getDate() / 7);
+  const currentDate = today.getDate();
 
   switch (series) {
     case "weekly":
+      // Next Friday
       const nextFriday = new Date();
       nextFriday.setDate(today.getDate() + ((5 + 7 - today.getDay()) % 7));
+      // If today is Friday and we've passed distribution time, move to next week
+      if (today.getDay() === 5 && today.getHours() >= 16) {
+        nextFriday.setDate(nextFriday.getDate() + 7);
+      }
       return nextFriday;
+
     case "seriesA":
-      return new Date(
-        today.getFullYear(),
-        currentMonth + (currentWeek > 1 ? 1 : 0),
-        21
-      );
+      // 21st of each month
+      let seriesADate = new Date(currentYear, currentMonth, 21);
+      if (currentDate > 21) {
+        seriesADate = new Date(currentYear, currentMonth + 1, 21);
+      }
+      return seriesADate;
+
     case "seriesB":
-      return new Date(
-        today.getFullYear(),
-        currentMonth + (currentWeek > 2 ? 1 : 0),
-        28
-      );
+      // 28th of each month
+      let seriesBDate = new Date(currentYear, currentMonth, 28);
+      if (currentDate > 28) {
+        seriesBDate = new Date(currentYear, currentMonth + 1, 28);
+      }
+      return seriesBDate;
+
     case "seriesC":
-      return new Date(
-        today.getFullYear(),
-        currentMonth + (currentWeek > 3 ? 1 : 0),
-        7
-      );
+      // 7th of each month
+      let seriesCDate = new Date(currentYear, currentMonth, 7);
+      if (currentDate > 7) {
+        seriesCDate = new Date(currentYear, currentMonth + 1, 7);
+      }
+      return seriesCDate;
+
     case "seriesD":
-      return new Date(
-        today.getFullYear(),
-        currentMonth + (currentWeek > 4 ? 1 : 0),
-        14
-      );
+      // 14th of each month
+      let seriesDDate = new Date(currentYear, currentMonth, 14);
+      if (currentDate > 14) {
+        seriesDDate = new Date(currentYear, currentMonth + 1, 14);
+      }
+      return seriesDDate;
+
     default:
-      return ""; // Return an empty string or a default date for unknown series
+      return new Date();
+  }
+};
+
+const getYearlyPayments = (series) => {
+  switch (series) {
+    case "weekly":
+      return 52; // Weekly payments
+    case "seriesA":
+    case "seriesB":
+    case "seriesC":
+    case "seriesD":
+      return 13; // 13 payments per year
+    default:
+      return 12;
   }
 };
 
@@ -113,7 +143,6 @@ const DashboardGrid = () => {
 
   const groupETFsByDistribution = (etfs) => {
     const weeklyTickers = ["YMAG", "YMAX", "LFGY", "GPTY"];
-
     const groupATickers = [
       "TSLY",
       "GOOY",
@@ -125,7 +154,6 @@ const DashboardGrid = () => {
       "FIVY",
       "FEAT",
     ];
-
     const groupBTickers = [
       "NVDY",
       "FBY",
@@ -135,7 +163,6 @@ const DashboardGrid = () => {
       "MARO",
       "PLTY",
     ];
-
     const groupCTickers = [
       "CONY",
       "MSFO",
@@ -145,7 +172,6 @@ const DashboardGrid = () => {
       "ULTY",
       "ABNY",
     ];
-
     const groupDTickers = [
       "MSTY",
       "AMZY",
@@ -159,7 +185,6 @@ const DashboardGrid = () => {
     const grouped = etfs.reduce((acc, etf) => {
       let distribution;
 
-      // Check if the ETF ticker belongs to one of the groups
       if (weeklyTickers.includes(etf.ticker)) {
         distribution = "weekly";
       } else if (groupATickers.includes(etf.ticker)) {
@@ -170,12 +195,6 @@ const DashboardGrid = () => {
         distribution = "seriesC";
       } else if (groupDTickers.includes(etf.ticker)) {
         distribution = "seriesD";
-      } else if (etf.distribution === 0.26) {
-        distribution = "weekly";
-      } else if (etf.distribution >= 0.83 && etf.distribution <= 0.95) {
-        distribution = `series${String.fromCharCode(
-          65 + Math.floor((etf.distribution - 0.83) / 0.03)
-        )}`;
       } else {
         distribution = "unknown";
       }
@@ -183,7 +202,10 @@ const DashboardGrid = () => {
       if (!acc[distribution]) {
         acc[distribution] = [];
       }
-      acc[distribution].push(etf);
+      acc[distribution].push({
+        ...etf,
+        distribution: DISTRIBUTIONS[etf.ticker] || 0, // Add distribution from DISTRIBUTIONS
+      });
       return acc;
     }, {});
 
@@ -213,6 +235,8 @@ const DashboardGrid = () => {
       {Object.entries(groupedETFs).map(([distribution, etfs]) => {
         const { bgColor, headerBgColor, textColor } =
           getSeriesColorClasses(distribution);
+        const yearlyPayments = getYearlyPayments(distribution);
+
         return (
           <div
             key={distribution}
@@ -232,43 +256,31 @@ const DashboardGrid = () => {
                 >
                   <Calendar className="inline-block w-4 h-4 mr-1" />
                   Next Distribution:{" "}
-                  {typeof getNextDistributionDate(distribution) === "string"
-                    ? getNextDistributionDate(distribution)
-                    : getNextDistributionDate(
-                        distribution
-                      ).toLocaleDateString()}
+                  {getNextDistributionDate(distribution).toLocaleDateString(
+                    "en-US",
+                    {
+                      month: "numeric",
+                      day: "numeric",
+                      year: "numeric",
+                    }
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
               {etfs.map((etf) => {
-                const isPositive = etf.price >= etf.prevPrice;
+                const monthlyDist = DISTRIBUTIONS[etf.ticker] || 0;
+                const yearlyDist = monthlyDist * yearlyPayments;
+
                 return (
                   <div
                     key={etf.ticker}
                     className="bg-white rounded-lg p-4 shadow-sm"
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h3 className="text-lg font-medium">{etf.ticker}</h3>
-                        <p className="text-sm text-gray-500">{etf.name}</p>
-                      </div>
-                      <div
-                        className={`flex items-center ${
-                          isPositive ? "text-green-600" : "text-red-600"
-                        }`}
-                      >
-                        {isPositive ? (
-                          <ArrowUp className="w-4 h-4 mr-1" />
-                        ) : (
-                          <ArrowDown className="w-4 h-4 mr-1" />
-                        )}
-                        {Math.abs(
-                          (etf.price - etf.prevPrice) / etf.prevPrice
-                        ).toFixed(2)}
-                        %
-                      </div>
+                    <div className="mb-2">
+                      <h3 className="text-lg font-medium">{etf.ticker}</h3>
+                      <p className="text-sm text-gray-500">{etf.name}</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 mt-4">
@@ -282,12 +294,22 @@ const DashboardGrid = () => {
                       </div>
                       <div>
                         <p className="text-sm text-gray-500 flex items-center">
-                          <CircleDollarSign className="w-4 h-4 mr-1" /> Dividend
+                          <CircleDollarSign className="w-4 h-4 mr-1" /> Monthly
+                          Dist.
                         </p>
                         <p className="text-lg font-medium">
-                          ${etf.distribution?.toFixed(2) || "N/A"}
+                          ${monthlyDist.toFixed(2)}
+                          <span className="text-xs text-gray-500 block">
+                            ${yearlyDist.toFixed(2)}/yr ({yearlyPayments}x)
+                          </span>
                         </p>
                       </div>
+                    </div>
+
+                    <div className="mt-2 pt-2 border-t">
+                      <p className="text-sm text-gray-500">
+                        Yield: {((yearlyDist / etf.price) * 100).toFixed(2)}%
+                      </p>
                     </div>
                   </div>
                 );

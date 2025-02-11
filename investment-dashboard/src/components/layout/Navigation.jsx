@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Briefcase } from "lucide-react";
+import { LayoutDashboard, Briefcase, Building } from "lucide-react";
 
 const Navigation = () => {
   const baseStyles =
@@ -26,6 +26,15 @@ const Navigation = () => {
       >
         <Briefcase className="w-5 h-5" />
         <span>Portfolio</span>
+      </NavLink>
+      <NavLink
+        to="/austin"
+        className={({ isActive }) =>
+          `${baseStyles} ${isActive ? activeStyles : inactiveStyles}`
+        }
+      >
+        <Building className="w-5 h-5" />
+        <span>Austin</span>
       </NavLink>
     </nav>
   );
