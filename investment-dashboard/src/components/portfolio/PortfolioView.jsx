@@ -162,20 +162,46 @@ const PortfolioView = () => {
     }
   };
 
+  const getMonthlyDistribution = (ticker, year, month) => {
+    // Try to get current month's distribution
+    const currentDist = getDistribution(ticker, year, month);
+
+    // If current month is not available, try previous month
+    if (!currentDist || currentDist === 0) {
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const prevDist = getDistribution(ticker, prevYear, prevMonth);
+      if (!prevDist || prevDist === 0) {
+        return "TBD";
+      }
+      return prevDist;
+    }
+
+    return currentDist;
+  };
+
   const calculateMonthlyIncome = (etf, year, month) => {
     const { group } = getETFDetails(etf.ticker);
-    const distribution = getDistribution(etf.ticker.toUpperCase(), year, month);
+    const distribution = getMonthlyDistribution(
+      etf.ticker.toUpperCase(),
+      year,
+      month
+    );
+
+    if (distribution === "TBD") {
+      return "TBD";
+    }
+
     const shares = Number(etf.totalShares);
+    let multiplier = 1;
 
     if (["YMAG", "YMAX", "LFGY", "GPTY"].includes(etf.ticker.toUpperCase())) {
-      return distribution * shares * (52 / 12);
+      multiplier = 52 / 12;
+    } else if (group.startsWith("GROUP_")) {
+      multiplier = 13 / 12;
     }
 
-    if (group.startsWith("GROUP_")) {
-      return distribution * shares * (13 / 12);
-    }
-
-    return distribution * shares;
+    return distribution * shares * multiplier;
   };
 
   const calculateTotalDividends = (etf) => {
@@ -534,22 +560,31 @@ const PortfolioView = () => {
         const monthNum =
           new Date(Date.parse(month + " 1, 2000")).getMonth() + 1;
 
-        // Calculate total monthly income for current month
-        const currentMonthIncome = etfs.reduce((total, etf) => {
-          const monthlyIncome = calculateMonthlyIncome(
-            etf,
-            selectedYear,
-            monthNum
-          );
-          return total + monthlyIncome;
+        // Calculate total monthly income
+        const monthlyIncomes = etfs.map((etf) =>
+          calculateMonthlyIncome(etf, selectedYear, monthNum)
+        );
+        const currentMonthIncome = monthlyIncomes.reduce((total, income) => {
+          if (income === "TBD" || typeof income !== "number") return total;
+          return total + income;
         }, 0);
 
-        // Calculate total value for current month
+        // Calculate total value
         const currentMonthTotalValue = etfs.reduce((total, etf) => {
           const currentPrice = prices[etf.ticker.toUpperCase()];
           const value = etf.totalShares * currentPrice;
           return total + (value || 0);
         }, 0);
+
+        // Check if we're using any previous month values
+        const usingPreviousMonth = etfs.some((etf) => {
+          const currentDist = getDistribution(
+            etf.ticker.toUpperCase(),
+            selectedYear,
+            monthNum
+          );
+          return !currentDist || currentDist === 0;
+        });
 
         return (
           <div key={month} className="bg-white rounded-lg shadow-sm mb-6">
@@ -586,6 +621,11 @@ const PortfolioView = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {etfs.map((etf) => {
                     const { group } = getETFDetails(etf.ticker);
+                    const distribution = getMonthlyDistribution(
+                      etf.ticker.toUpperCase(),
+                      selectedYear,
+                      monthNum
+                    );
                     const monthlyIncome = calculateMonthlyIncome(
                       etf,
                       selectedYear,
@@ -593,7 +633,9 @@ const PortfolioView = () => {
                     );
                     const currentPrice = prices[etf.ticker.toUpperCase()];
                     const totalValue = etf.totalShares * currentPrice;
-                    const distribution = getDistribution(
+
+                    // Check if this ETF is using previous month's value
+                    const isUsingPrevMonth = !getDistribution(
                       etf.ticker.toUpperCase(),
                       selectedYear,
                       monthNum
@@ -627,12 +669,20 @@ const PortfolioView = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            ${distribution.toFixed(2)}
+                            {distribution === "TBD"
+                              ? "TBD"
+                              : `$${distribution.toFixed(2)}${
+                                  isUsingPrevMonth ? "*" : ""
+                                }`}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-green-600 font-medium">
-                            ${monthlyIncome.toFixed(2)}
+                            {monthlyIncome === "TBD"
+                              ? "TBD"
+                              : `$${monthlyIncome.toFixed(2)}${
+                                  isUsingPrevMonth ? "*" : ""
+                                }`}
                           </div>
                         </td>
                       </tr>
@@ -663,6 +713,7 @@ const PortfolioView = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-green-600 font-medium">
                         ${currentMonthIncome.toFixed(2)}
+                        {usingPreviousMonth ? "*" : ""}
                       </div>
                     </td>
                   </tr>
@@ -672,6 +723,9 @@ const PortfolioView = () => {
           </div>
         );
       })}
+      <div className="text-xs text-gray-500 mt-2">
+        * Using previous month's distribution
+      </div>
     </div>
   );
 };

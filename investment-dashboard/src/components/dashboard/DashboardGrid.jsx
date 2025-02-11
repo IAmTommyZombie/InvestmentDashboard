@@ -127,10 +127,17 @@ const DashboardGrid = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Get current year and month
-  const currentDate = new Date();
-  const currentYear = currentDate.getFullYear();
-  const currentMonth = currentDate.getMonth() + 1; // getMonth() returns 0-11
+  // Get today's date
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth() + 1; // getMonth() returns 0-11
+
+  // Function to get the distribution based on today's date
+  const getTodaysDistribution = (ticker) => {
+    const distribution = getDistribution(ticker, currentYear, currentMonth);
+    // Return "TBD" if the distribution is explicitly 0
+    return distribution === 0 ? "TBD" : distribution;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -276,13 +283,9 @@ const DashboardGrid = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
               {etfs.map((etf) => {
-                // Get the current month's distribution amount
-                const monthlyDist = getDistribution(
-                  etf.ticker,
-                  currentYear,
-                  currentMonth
-                );
-                const yearlyDist = monthlyDist * yearlyPayments;
+                const monthlyDist = getTodaysDistribution(etf.ticker);
+                const yearlyDist =
+                  monthlyDist === "TBD" ? "TBD" : monthlyDist * yearlyPayments;
 
                 return (
                   <div
@@ -309,9 +312,15 @@ const DashboardGrid = () => {
                           Dist.
                         </p>
                         <p className="text-lg font-medium">
-                          ${monthlyDist.toFixed(2)}
+                          {monthlyDist === "TBD"
+                            ? "TBD"
+                            : `$${monthlyDist.toFixed(2)}`}
                           <span className="text-xs text-gray-500 block">
-                            ${yearlyDist.toFixed(2)}/yr ({yearlyPayments}x)
+                            {yearlyDist === "TBD"
+                              ? "TBD"
+                              : `$${yearlyDist.toFixed(
+                                  2
+                                )}/yr (${yearlyPayments}x)`}
                           </span>
                         </p>
                       </div>
@@ -319,7 +328,10 @@ const DashboardGrid = () => {
 
                     <div className="mt-2 pt-2 border-t">
                       <p className="text-sm text-gray-500">
-                        Yield: {((yearlyDist / etf.price) * 100).toFixed(2)}%
+                        Yield:{" "}
+                        {yearlyDist === "TBD"
+                          ? "TBD"
+                          : `${((yearlyDist / etf.price) * 100).toFixed(2)}%`}
                       </p>
                     </div>
                   </div>

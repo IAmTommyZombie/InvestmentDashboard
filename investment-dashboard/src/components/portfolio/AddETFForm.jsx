@@ -9,7 +9,6 @@ const AddETFForm = ({ onClose, onSuccess }) => {
 
   const [formData, setFormData] = useState({
     ticker: "",
-    distribution: "",
     purchaseDate: defaultDate,
     shares: "",
   });
@@ -24,11 +23,6 @@ const AddETFForm = ({ onClose, onSuccess }) => {
         return;
       }
 
-      if (!formData.distribution || formData.distribution < 0) {
-        setError("Please enter a valid distribution amount");
-        return;
-      }
-
       if (!formData.shares || formData.shares <= 0) {
         setError("Please enter a valid number of shares");
         return;
@@ -36,7 +30,6 @@ const AddETFForm = ({ onClose, onSuccess }) => {
 
       await addETF({
         ticker: formData.ticker.toUpperCase(),
-        distribution: Number(formData.distribution),
         purchaseDate: formData.purchaseDate,
         shares: Number(formData.shares),
       });
@@ -117,26 +110,6 @@ const AddETFForm = ({ onClose, onSuccess }) => {
               placeholder="Enter number of shares"
               required
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Distribution Amount (per share)
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-2 text-gray-500">$</span>
-              <input
-                type="number"
-                step="0.0001"
-                value={formData.distribution}
-                onChange={(e) =>
-                  setFormData({ ...formData, distribution: e.target.value })
-                }
-                className="w-full border rounded-md px-8 py-2"
-                placeholder="Enter distribution amount"
-                required
-              />
-            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
