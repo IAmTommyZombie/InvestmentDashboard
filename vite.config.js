@@ -4,33 +4,20 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   base: "/InvestmentDashboard/",
-  plugins: [react(), tailwindcss()], // Remove tailwindcss from plugins
-  resolve: {
-    dedupe: ["react", "react-dom"],
-  },
+  plugins: [react(), tailwindcss()],
   build: {
+    outDir: "dist",
+    cssCodeSplit: true,
     rollupOptions: {
-      external: [
-        "react",
-        "react-dom",
-        "@radix-ui/react-dialog",
-        "@radix-ui/react-slot",
-      ],
-    },
-  },
-  server: {
-    port: 5173,
-    strictPort: true,
-    proxy: {
-      "/api": {
-        target: "http://localhost:3500",
-        changeOrigin: true,
-        secure: false,
+      external: [], // Remove external configuration
+      output: {
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name === "index.css") return "assets/[name][extname]";
+          return "assets/[name]-[hash][extname]";
+        },
+        chunkFileNames: "assets/[name]-[hash].js",
+        entryFileNames: "assets/[name]-[hash].js",
       },
-    },
-    hmr: {
-      overlay: false,
-      timeout: 30000,
     },
   },
 });
