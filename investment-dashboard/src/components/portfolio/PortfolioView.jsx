@@ -15,6 +15,7 @@ import {
 import AddETFForm from "./AddETFForm";
 import { DISTRIBUTIONS } from "../../data/distributions";
 import axios from "axios";
+import { getDistribution } from "../../data/distributions";
 
 const getGroupStyle = (group) => {
   switch (group) {
@@ -161,25 +162,19 @@ const PortfolioView = () => {
     }
   };
 
-  const calculateMonthlyIncome = (etf) => {
+  const calculateMonthlyIncome = (etf, year, month) => {
     const { group } = getETFDetails(etf.ticker);
-    const distribution = DISTRIBUTIONS[etf.ticker.toUpperCase()] || 0;
-    const shares = Number(etf.shares);
+    const distribution = getDistribution(etf.ticker.toUpperCase(), year, month);
+    const shares = Number(etf.totalShares);
 
-    // Weekly payers get 4-5 payments per month
     if (["YMAG", "YMAX", "LFGY", "GPTY"].includes(etf.ticker.toUpperCase())) {
-      // Weekly ETFs pay ~4.33 times per month (52/12)
       return distribution * shares * (52 / 12);
     }
 
-    // Groups A, B, C, D get 1 payment per month, plus an extra payment
-    // distributed throughout the year (13 total payments)
     if (group.startsWith("GROUP_")) {
-      // 13 payments per year = 1.0833... payments per month average
       return distribution * shares * (13 / 12);
     }
 
-    // Default case (monthly payers)
     return distribution * shares;
   };
 
@@ -536,22 +531,25 @@ const PortfolioView = () => {
       </div>
 
       {monthlyGroups.map(({ month, etfs }, index) => {
-        // Calculate monthly income for current month
+        const monthNum =
+          new Date(Date.parse(month + " 1, 2000")).getMonth() + 1;
+
+        // Calculate total monthly income for current month
         const currentMonthIncome = etfs.reduce((total, etf) => {
-          return total + calculateMonthlyIncome(etf);
+          const monthlyIncome = calculateMonthlyIncome(
+            etf,
+            selectedYear,
+            monthNum
+          );
+          return total + monthlyIncome;
         }, 0);
 
-        // Calculate cumulative total by adding all previous months
-        const cumulativeTotal = monthlyGroups
-          .slice(0, index + 1)
-          .reduce((total, monthGroup) => {
-            return (
-              total +
-              monthGroup.etfs.reduce((monthTotal, etf) => {
-                return monthTotal + calculateMonthlyIncome(etf);
-              }, 0)
-            );
-          }, 0);
+        // Calculate total value for current month
+        const currentMonthTotalValue = etfs.reduce((total, etf) => {
+          const currentPrice = prices[etf.ticker.toUpperCase()];
+          const value = etf.totalShares * currentPrice;
+          return total + (value || 0);
+        }, 0);
 
         return (
           <div key={month} className="bg-white rounded-lg shadow-sm mb-6">
@@ -572,10 +570,13 @@ const PortfolioView = () => {
                       Group
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Shares
+                      Shares
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Value
+                      Value
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Distribution Amount
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Monthly Income
@@ -585,8 +586,18 @@ const PortfolioView = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {etfs.map((etf) => {
                     const { group } = getETFDetails(etf.ticker);
-                    const monthlyIncome = calculateMonthlyIncome(etf);
-                    const totalValue = etf.totalShares * etf.currentPrice;
+                    const monthlyIncome = calculateMonthlyIncome(
+                      etf,
+                      selectedYear,
+                      monthNum
+                    );
+                    const currentPrice = prices[etf.ticker.toUpperCase()];
+                    const totalValue = etf.totalShares * currentPrice;
+                    const distribution = getDistribution(
+                      etf.ticker.toUpperCase(),
+                      selectedYear,
+                      monthNum
+                    );
 
                     return (
                       <tr key={etf._id} className={getGroupStyle(group)}>
@@ -608,10 +619,15 @@ const PortfolioView = () => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
                             $
-                            {totalValue.toLocaleString("en-US", {
+                            {totalValue?.toLocaleString(undefined, {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
-                            })}
+                            }) || "N/A"}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            ${distribution.toFixed(2)}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -622,17 +638,31 @@ const PortfolioView = () => {
                       </tr>
                     );
                   })}
-                  {/* Updated total row */}
                   <tr className="bg-gray-50 font-medium">
                     <td
-                      colSpan="4"
+                      colSpan="3"
+                      className="px-6 py-4 text-right text-sm text-gray-900"
+                    >
+                      Total Value:
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 font-medium">
+                        $
+                        {currentMonthTotalValue.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    </td>
+                    <td
+                      colSpan="1"
                       className="px-6 py-4 text-right text-sm text-gray-900"
                     >
                       Total:
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-green-600 font-medium">
-                        ${cumulativeTotal.toFixed(2)}
+                        ${currentMonthIncome.toFixed(2)}
                       </div>
                     </td>
                   </tr>

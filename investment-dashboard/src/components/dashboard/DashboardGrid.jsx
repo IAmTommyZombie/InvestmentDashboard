@@ -9,6 +9,7 @@ import {
   CircleDollarSign,
 } from "lucide-react";
 import { DISTRIBUTIONS } from "../../data/distributions";
+import { getDistribution } from "../../data/distributions";
 
 const API_URL = "http://localhost:3500/api";
 
@@ -125,6 +126,11 @@ const DashboardGrid = () => {
   const [etfs, setEtfs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Get current year and month
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // getMonth() returns 0-11
 
   useEffect(() => {
     const fetchData = async () => {
@@ -270,7 +276,12 @@ const DashboardGrid = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
               {etfs.map((etf) => {
-                const monthlyDist = DISTRIBUTIONS[etf.ticker] || 0;
+                // Get the current month's distribution amount
+                const monthlyDist = getDistribution(
+                  etf.ticker,
+                  currentYear,
+                  currentMonth
+                );
                 const yearlyDist = monthlyDist * yearlyPayments;
 
                 return (
