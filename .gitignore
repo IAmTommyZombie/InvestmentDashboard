@@ -69,3 +69,4 @@ node_modules/
 .dataconnect
 .env
 .env
+service-account-key.json

@@ -10,6 +10,22 @@ const {
 } = require("firebase/firestore");
 const { FALLBACK_PRICES } = require("../config/fallbackPrices");
 require("dotenv").config();
+const puppeteer = require("puppeteer");
+const admin = require("firebase-admin");
+const path = require("path");
+
+// Initialize Firebase Admin with the service account
+const serviceAccount = require("../service-account-key.json");
+
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: "investment-dashboard-77e78",
+  });
+}
+
+const db = admin.firestore();
 
 // Firebase configuration
 const firebaseConfig = {
@@ -24,7 +40,7 @@ const firebaseConfig = {
 // Initialize Firebase
 console.log("Initializing Firebase...");
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const dbFirebase = getFirestore(app);
 
 console.log("Initializing Firebase with config:", {
   projectId: firebaseConfig.projectId,
@@ -49,7 +65,7 @@ async function setupBrowser() {
 
 async function getPrice(page, ticker) {
   console.log(`Processing ${ticker}...`);
-  const yahooUrl = `https://finance.yahoo.com/quote/${ticker}/history/`;
+  const yahooUrl = `https://finance.yahoo.com/quote/${ticker}/`;
 
   try {
     await page.setDefaultTimeout(60000);
@@ -165,7 +181,7 @@ async function savePricesToFirebase(prices) {
     try {
       console.log(`Saving ${priceData.ticker} at $${priceData.price}...`);
 
-      const priceRef = doc(collection(db, "prices"), priceData.ticker);
+      const priceRef = doc(collection(dbFirebase, "prices"), priceData.ticker);
       await setDoc(priceRef, {
         currentPrice: priceData.price,
         lastUpdated: priceData.timestamp,
@@ -186,7 +202,7 @@ async function updatePrices() {
 
   // Set status in Firebase as running
   try {
-    await setDoc(doc(db, "status", "updateStatus"), {
+    await setDoc(doc(dbFirebase, "status", "updateStatus"), {
       status: "running",
       startTime: Timestamp.now(),
     });
@@ -211,7 +227,7 @@ async function updatePrices() {
         const { price, source } = await getPrice(page, ticker);
 
         // Save to Firebase
-        const priceRef = doc(collection(db, "prices"), ticker);
+        const priceRef = doc(collection(dbFirebase, "prices"), ticker);
         await setDoc(priceRef, {
           currentPrice: price,
           lastUpdated: Timestamp.now(),
@@ -227,7 +243,7 @@ async function updatePrices() {
 
         // Save fallback price
         const fallbackPrice = FALLBACK_PRICES[ticker].price;
-        const priceRef = doc(collection(db, "prices"), ticker);
+        const priceRef = doc(collection(dbFirebase, "prices"), ticker);
         await setDoc(priceRef, {
           currentPrice: fallbackPrice,
           lastUpdated: Timestamp.now(),
@@ -239,7 +255,7 @@ async function updatePrices() {
     }
 
     // Update completion status in Firebase
-    await setDoc(doc(db, "status", "updateStatus"), {
+    await setDoc(doc(dbFirebase, "status", "updateStatus"), {
       status: "completed",
       endTime: Timestamp.now(),
       totalUpdated: results.length,
@@ -252,7 +268,7 @@ async function updatePrices() {
   } catch (error) {
     console.error("Fatal error:", error);
     // Update error status in Firebase
-    await setDoc(doc(db, "status", "updateStatus"), {
+    await setDoc(doc(dbFirebase, "status", "updateStatus"), {
       status: "error",
       endTime: Timestamp.now(),
       error: error.message,
@@ -297,6 +313,72 @@ function startScheduler() {
   return { marketCloseJob, marketOpenJob };
 }
 
+async function scrapePriceForTicker(ticker) {
+  console.log(`\n=== Starting to scrape price for ${ticker} ===`);
+
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    const url = `https://finance.yahoo.com/quote/${ticker}`;
+    console.log(`Navigating to: ${url}`);
+
+    await page.goto(url);
+
+    // Use the new waitForSelector with XPath
+    await page.waitForSelector('[data-testid="qsp-price"]', {
+      timeout: 10000,
+    });
+
+    // Get the price using the new selector method
+    const priceElement = await page.$('[data-testid="qsp-price"]');
+    if (!priceElement) {
+      throw new Error(`Could not find price element for ${ticker}`);
+    }
+
+    const price = await page.evaluate((el) => el.textContent, priceElement);
+    console.log(`Found raw price for ${ticker}: ${price}`);
+
+    if (!price) {
+      throw new Error(`Could not find price for ${ticker}`);
+    }
+
+    const numericPrice = parseFloat(price.replace(/[^0-9.]/g, ""));
+
+    if (isNaN(numericPrice)) {
+      throw new Error(`Invalid price format for ${ticker}: ${price}`);
+    }
+
+    console.log(`Parsed price for ${ticker}: $${numericPrice}`);
+
+    // Update Firestore
+    await db.collection("prices").doc(ticker).set({
+      currentPrice: numericPrice,
+      lastUpdated: admin.firestore.Timestamp.now(),
+      source: "yahoo",
+      ticker: ticker,
+    });
+
+    console.log(`Successfully saved to Firestore:`);
+    console.log(`- Ticker: ${ticker}`);
+    console.log(`- Price: $${numericPrice}`);
+    console.log(`=== Completed ${ticker} ===\n`);
+
+    return {
+      ticker,
+      price: numericPrice,
+    };
+  } catch (error) {
+    console.error(`!!! Error scraping ${ticker}:`, error);
+    throw error;
+  } finally {
+    await browser.close();
+  }
+}
+
 // If running directly (not imported)
 if (require.main === module) {
   console.log("Running price update...");
@@ -311,4 +393,5 @@ module.exports = {
   savePricesToFirebase,
   updatePrices,
   startScheduler,
+  scrapePriceForTicker,
 };

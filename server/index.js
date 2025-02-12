@@ -4,12 +4,17 @@ const cors = require("cors");
 const ETF = require("./models/etf");
 const PriceHistory = require("./models/priceHistory");
 const priceService = require("./services/priceService");
+const { scrapePriceForTicker } = require("./scripts/scraper");
 
 // Initialize express
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: "http://localhost:5173", // Your Vite dev server URL
+  })
+);
 app.use(express.json());
 
 // MongoDB connection
@@ -179,8 +184,43 @@ app.post("/api/etfs/:id/purchases", async (req, res) => {
   }
 });
 
+app.post("/scrape-price", async (req, res) => {
+  try {
+    const { ticker } = req.body;
+    console.log("Received request for ticker:", ticker);
+
+    if (!ticker) {
+      console.error("No ticker provided");
+      return res.status(400).json({ error: "Ticker is required" });
+    }
+
+    console.log(`Starting price scrape for ${ticker}...`);
+    const price = await scrapePriceForTicker(ticker);
+    console.log(`Successfully scraped price for ${ticker}: ${price}`);
+
+    res.json({
+      success: true,
+      message: `Price updated for ${ticker}`,
+      price: price,
+      ticker: ticker,
+    });
+  } catch (error) {
+    console.error("Detailed error:", {
+      message: error.message,
+      stack: error.stack,
+      ticker: req.body.ticker,
+    });
+
+    res.status(500).json({
+      error: error.message,
+      details: error.stack,
+      ticker: req.body.ticker,
+    });
+  }
+});
+
 // Start server
-const PORT = 3500;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
