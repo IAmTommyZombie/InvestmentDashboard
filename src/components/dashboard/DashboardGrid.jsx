@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../../firebase/config";
-import { collection, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  doc,
+  setDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { usePortfolio } from "../../context/PortfolioContext";
 import { useDistributions } from "../../context/DistributionContext";
 import { PieChart, BarChart3, DollarSign } from "lucide-react";
@@ -10,6 +16,45 @@ import {
   GROUP_ORDER,
   getETFStatus,
 } from "../../data/etfMetadata";
+import { UpdateButton } from "./UpdateButton";
+import { formatCurrency } from "../../utils/formatters";
+
+const FALLBACK_PRICES = {
+  YMAG: { price: 18.0, quantity: 100 },
+  YMAX: { price: 16.49, quantity: 100 },
+  LFGY: { price: 47.8, quantity: 100 },
+  GPTY: { price: 48.29, quantity: 100 },
+  TSLY: { price: 11.51, quantity: 100 },
+  GOOY: { price: 14.2, quantity: 100 },
+  YBIT: { price: 11.96, quantity: 100 },
+  OARK: { price: 10.6, quantity: 100 },
+  XOMO: { price: 14.46, quantity: 100 },
+  TSMY: { price: 18.36, quantity: 100 },
+  CRSH: { price: 6.71, quantity: 100 },
+  FIVY: { price: 45.94, quantity: 100 },
+  FEAT: { price: 45.36, quantity: 100 },
+  NVDY: { price: 20.55, quantity: 100 },
+  FBY: { price: 20.86, quantity: 100 },
+  GDXY: { price: 15.84, quantity: 100 },
+  JPMO: { price: 19.15, quantity: 100 },
+  MRNY: { price: 3.35, quantity: 100 },
+  MARO: { price: 31.65, quantity: 100 },
+  PLTY: { price: 88.69, quantity: 100 },
+  CONY: { price: 11.94, quantity: 100 },
+  MSFO: { price: 16.93, quantity: 100 },
+  AMDY: { price: 8.73, quantity: 100 },
+  NFLY: { price: 18.35, quantity: 100 },
+  PYPY: { price: 15.0, quantity: 100 },
+  ULTY: { price: 8.17, quantity: 100 },
+  ABNY: { price: 14.91, quantity: 100 },
+  MSTY: { price: 26.37, quantity: 100 },
+  AMZY: { price: 19.46, quantity: 100 },
+  APLY: { price: 16.78, quantity: 100 },
+  DISO: { price: 16.27, quantity: 100 },
+  SQY: { price: 16.52, quantity: 100 },
+  SMCY: { price: 28.33, quantity: 100 },
+  AIYY: { price: 7.62, quantity: 100 },
+};
 
 const DashboardGrid = () => {
   const { etfs = [], totalValue = 0, totalShares = 0 } = usePortfolio() || {};
@@ -21,16 +66,36 @@ const DashboardGrid = () => {
   } = useDistributions() || {};
   const [prices, setPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(true);
+  const [updatingETFs, setUpdatingETFs] = useState({});
+  const [status, setStatus] = useState({});
+  const [lastUpdateTime, setLastUpdateTime] = useState({});
+  const [priceChanges, setPriceChanges] = useState({});
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, "prices"),
       (snapshot) => {
-        const priceData = {};
-        snapshot.forEach((doc) => {
-          priceData[doc.id] = doc.data().currentPrice;
+        const newPrices = { ...prices };
+
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "modified" || change.type === "added") {
+            const data = change.doc.data();
+            newPrices[data.ticker] = data.currentPrice;
+
+            // Calculate price change after we have the data
+            const previousPrice =
+              FALLBACK_PRICES[data.ticker]?.price || data.currentPrice;
+            const priceChange =
+              ((data.currentPrice - previousPrice) / previousPrice) * 100;
+
+            setPriceChanges((prev) => ({
+              ...prev,
+              [data.ticker]: priceChange,
+            }));
+          }
         });
-        setPrices(priceData);
+
+        setPrices(newPrices);
         setPricesLoading(false);
       },
       (error) => {
@@ -41,6 +106,37 @@ const DashboardGrid = () => {
 
     return () => unsubscribe();
   }, []);
+
+  const updateSingleETF = async (ticker) => {
+    if (!ticker) return;
+
+    setUpdatingETFs((prev) => ({ ...prev, [ticker]: true }));
+    setStatus((prev) => ({ ...prev, [ticker]: "⏳ Updating..." }));
+
+    try {
+      // Simulate price update for now
+      const mockPrice =
+        FALLBACK_PRICES[ticker].price * (1 + Math.random() * 0.1 - 0.05);
+
+      await setDoc(doc(db, "prices", ticker), {
+        currentPrice: mockPrice,
+        lastUpdated: Timestamp.now(),
+        source: "mock",
+        ticker: ticker,
+      });
+
+      setStatus((prev) => ({ ...prev, [ticker]: "✅ Updated!" }));
+      setLastUpdateTime((prev) => ({
+        ...prev,
+        [ticker]: new Date().toLocaleString(),
+      }));
+    } catch (error) {
+      console.error(`Error updating ${ticker}:`, error);
+      setStatus((prev) => ({ ...prev, [ticker]: "❌ Failed to update" }));
+    } finally {
+      setUpdatingETFs((prev) => ({ ...prev, [ticker]: false }));
+    }
+  };
 
   const calculateAnnualYield = (etf) => {
     if (!etf?.ticker || !prices) return "N/A";
@@ -145,6 +241,10 @@ const DashboardGrid = () => {
       ? "bg-blue-100 border-l-4 border-blue-500"
       : "hover:bg-gray-50";
 
+    const currentPrice = prices[etf.ticker] || "TBD";
+    const priceChange = priceChanges[etf.ticker] || 0;
+    const total = currentPrice * (etf?.shares || 0);
+
     return (
       <tr key={etf.ticker} className={`${heldStyles} transition-colors`}>
         <td className="px-4 py-3">
@@ -189,15 +289,27 @@ const DashboardGrid = () => {
             {etf.frequency}
           </span>
         </td>
-        <td className="px-4 py-3 text-right">
+        <td className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
           <div>
-            <span className="font-medium">
-              ${prices[etf.ticker]?.toFixed(2) || "TBD"}
-            </span>
+            <span className="font-medium">{formatCurrency(currentPrice)}</span>
+            {priceChange !== 0 && (
+              <span
+                className={`text-sm ${
+                  priceChange > 0
+                    ? "text-green-600"
+                    : priceChange < 0
+                    ? "text-red-600"
+                    : "text-gray-600"
+                }`}
+              >
+                {priceChange > 0 ? "↑" : "↓"}
+                {Math.abs(priceChange).toFixed(2)}%
+              </span>
+            )}
             <p className="text-xs text-gray-500">Inception: {etf.inception}</p>
           </div>
         </td>
-        <td className="px-4 py-3 text-right">
+        <td className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
           <span className={`font-medium ${statusStyles.text}`}>
             {getLatestDistribution(etf.ticker) === "TBD" ||
             getLatestDistribution(etf.ticker) === "N/A"
@@ -205,7 +317,7 @@ const DashboardGrid = () => {
               : `$${getLatestDistribution(etf.ticker)}`}
           </span>
         </td>
-        <td className="px-4 py-3 text-right">
+        <td className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
           <span
             className={`font-medium ${
               calculateAnnualYield(etf) !== "TBD" &&
@@ -223,8 +335,19 @@ const DashboardGrid = () => {
     );
   };
 
+  const calculateTotal = () => {
+    return Object.entries(FALLBACK_PRICES).reduce((total, [ticker, data]) => {
+      const currentPrice = prices[ticker] || data.price;
+      const quantity = data.quantity || 0;
+      return total + currentPrice * quantity;
+    }, 0);
+  };
+
   return (
     <div className="space-y-8 p-4">
+      <div className="mb-4">
+        <UpdateButton />
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between">
@@ -234,11 +357,7 @@ const DashboardGrid = () => {
             <DollarSign className="h-5 w-5 text-gray-400" />
           </div>
           <p className="mt-2 text-3xl font-bold text-gray-900">
-            $
-            {(totalValue || 0).toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatCurrency(totalValue || 0)}
           </p>
         </div>
 
@@ -250,11 +369,7 @@ const DashboardGrid = () => {
             <BarChart3 className="h-5 w-5 text-gray-400" />
           </div>
           <p className="mt-2 text-3xl font-bold text-gray-900">
-            $
-            {(monthlyIncome || 0).toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatCurrency(monthlyIncome || 0)}
           </p>
         </div>
 
@@ -311,6 +426,13 @@ const DashboardGrid = () => {
           </div>
         </div>
       ))}
+
+      <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg shadow-md p-6">
+        <h3 className="text-xl font-bold mb-2">Portfolio Total</h3>
+        <p className="text-3xl font-semibold">
+          {formatCurrency(calculateTotal())}
+        </p>
+      </div>
     </div>
   );
 };

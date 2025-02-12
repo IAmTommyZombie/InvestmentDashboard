@@ -1,6 +1,6 @@
 const { chromium } = require("playwright");
 const schedule = require("node-schedule");
-const { initializeApp } = require("firebase/app");
+const { initializeApp, getApp } = require("firebase/app");
 const {
   getFirestore,
   collection,
@@ -48,6 +48,7 @@ async function setupBrowser() {
 }
 
 async function getPrice(page, ticker) {
+  console.log(`Processing ${ticker}...`);
   const yahooUrl = `https://finance.yahoo.com/quote/${ticker}/history/`;
 
   try {
@@ -181,30 +182,86 @@ async function savePricesToFirebase(prices) {
 
 async function updatePrices() {
   console.log("Starting price update process...");
+  let browser = null;
+
+  // Set status in Firebase as running
   try {
-    const { results, errors } = await scrapePrices();
-    console.log(
-      "Prices scraped, attempting to save to Firebase:",
-      results.length,
-      "items"
-    );
-    await savePricesToFirebase(results);
-
-    console.log("\n=== Price Update Summary ===");
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Total prices updated: ${results.length}`);
-    console.log(`Failed updates: ${errors.length}`);
-    console.log("\nSuccessful updates:");
-    results.forEach((r) =>
-      console.log(`${r.ticker}: $${r.price} (${r.source})`)
-    );
-
-    if (errors.length > 0) {
-      console.log("\nErrors:");
-      errors.forEach((e) => console.log(`${e.ticker}: ${e.error}`));
-    }
+    await setDoc(doc(db, "status", "updateStatus"), {
+      status: "running",
+      startTime: Timestamp.now(),
+    });
   } catch (error) {
-    console.error("Update process failed:", error);
+    console.error("Failed to set initial status:", error);
+  }
+
+  try {
+    browser = await setupBrowser();
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    const results = [];
+    const errors = [];
+    const tickers = Object.keys(FALLBACK_PRICES);
+
+    console.log(`Starting to process ${tickers.length} tickers...`);
+
+    for (const ticker of tickers) {
+      try {
+        console.log(`Processing ${ticker}...`);
+        const { price, source } = await getPrice(page, ticker);
+
+        // Save to Firebase
+        const priceRef = doc(collection(db, "prices"), ticker);
+        await setDoc(priceRef, {
+          currentPrice: price,
+          lastUpdated: Timestamp.now(),
+          source: source,
+          ticker: ticker,
+        });
+
+        console.log(`✓ Saved ${ticker}: $${price}`);
+        results.push({ ticker, price, source });
+      } catch (error) {
+        console.error(`Failed to process ${ticker}:`, error);
+        errors.push({ ticker, error: error.message });
+
+        // Save fallback price
+        const fallbackPrice = FALLBACK_PRICES[ticker].price;
+        const priceRef = doc(collection(db, "prices"), ticker);
+        await setDoc(priceRef, {
+          currentPrice: fallbackPrice,
+          lastUpdated: Timestamp.now(),
+          source: "fallback",
+          ticker: ticker,
+        });
+      }
+      await page.waitForTimeout(1000);
+    }
+
+    // Update completion status in Firebase
+    await setDoc(doc(db, "status", "updateStatus"), {
+      status: "completed",
+      endTime: Timestamp.now(),
+      totalUpdated: results.length,
+      errors: errors.length,
+    });
+
+    console.log("\n=== Update Complete ===");
+    console.log(`Total updated: ${results.length}`);
+    console.log(`Errors: ${errors.length}`);
+  } catch (error) {
+    console.error("Fatal error:", error);
+    // Update error status in Firebase
+    await setDoc(doc(db, "status", "updateStatus"), {
+      status: "error",
+      endTime: Timestamp.now(),
+      error: error.message,
+    });
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+    process.exit(0);
   }
 }
 
@@ -240,8 +297,13 @@ function startScheduler() {
   return { marketCloseJob, marketOpenJob };
 }
 
+// If running directly (not imported)
 if (require.main === module) {
-  startScheduler();
+  console.log("Running price update...");
+  updatePrices().catch((error) => {
+    console.error("Fatal error in main:", error);
+    process.exit(1);
+  });
 }
 
 module.exports = {
