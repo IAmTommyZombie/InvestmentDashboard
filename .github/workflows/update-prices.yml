@@ -1,0 +1,27 @@
+name: Update Prices
+on: 
+  repository_dispatch:
+    types: [update-prices]
+  workflow_dispatch:  # Allows manual triggering from GitHub UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Install Playwright
+        run: npx playwright install chromium
+        
+      - name: Run price updates
+        run: node server/scripts/scraper.js
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
