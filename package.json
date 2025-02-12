@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
+    "start": "node server/index.js",
     "migrate": "node scripts/migrateToFirebase.js",
     "setup-firebase": "node scripts/setupFirebase.js"
   },
@@ -51,6 +52,6 @@
     "vite": "^5.0.7"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "16.x"
   }
 }
