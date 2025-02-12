@@ -1,345 +1,316 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import { db } from "../../firebase/config";
+import { collection, onSnapshot } from "firebase/firestore";
+import { usePortfolio } from "../../context/PortfolioContext";
+import { useDistributions } from "../../context/DistributionContext";
+import { PieChart, BarChart3, DollarSign } from "lucide-react";
 import {
-  ArrowUp,
-  ArrowDown,
-  Loader2,
-  Calendar,
-  DollarSign,
-  CircleDollarSign,
-} from "lucide-react";
-import { DISTRIBUTIONS } from "../../data/distributions";
-import { getDistribution } from "../../data/distributions";
-
-const API_URL = "http://localhost:3500/api";
-
-const getSeriesColorClasses = (series) => {
-  switch (series) {
-    case "weekly":
-      return {
-        bgColor: "bg-blue-50",
-        headerBgColor: "bg-blue-100",
-        textColor: "text-blue-900",
-      };
-    case "seriesA":
-      return {
-        bgColor: "bg-green-50",
-        headerBgColor: "bg-green-100",
-        textColor: "text-green-900",
-      };
-    case "seriesB":
-      return {
-        bgColor: "bg-purple-50",
-        headerBgColor: "bg-purple-100",
-        textColor: "text-purple-900",
-      };
-    case "seriesC":
-      return {
-        bgColor: "bg-orange-50",
-        headerBgColor: "bg-orange-100",
-        textColor: "text-orange-900",
-      };
-    case "seriesD":
-      return {
-        bgColor: "bg-pink-50",
-        headerBgColor: "bg-pink-100",
-        textColor: "text-pink-900",
-      };
-    default:
-      return {
-        bgColor: "bg-gray-50",
-        headerBgColor: "bg-gray-100",
-        textColor: "text-gray-900",
-      };
-  }
-};
-
-const getNextDistributionDate = (series) => {
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth();
-  const currentDate = today.getDate();
-
-  switch (series) {
-    case "weekly":
-      // Next Friday
-      const nextFriday = new Date();
-      nextFriday.setDate(today.getDate() + ((5 + 7 - today.getDay()) % 7));
-      // If today is Friday and we've passed distribution time, move to next week
-      if (today.getDay() === 5 && today.getHours() >= 16) {
-        nextFriday.setDate(nextFriday.getDate() + 7);
-      }
-      return nextFriday;
-
-    case "seriesA":
-      // 21st of each month
-      let seriesADate = new Date(currentYear, currentMonth, 21);
-      if (currentDate > 21) {
-        seriesADate = new Date(currentYear, currentMonth + 1, 21);
-      }
-      return seriesADate;
-
-    case "seriesB":
-      // 28th of each month
-      let seriesBDate = new Date(currentYear, currentMonth, 28);
-      if (currentDate > 28) {
-        seriesBDate = new Date(currentYear, currentMonth + 1, 28);
-      }
-      return seriesBDate;
-
-    case "seriesC":
-      // 7th of each month
-      let seriesCDate = new Date(currentYear, currentMonth, 7);
-      if (currentDate > 7) {
-        seriesCDate = new Date(currentYear, currentMonth + 1, 7);
-      }
-      return seriesCDate;
-
-    case "seriesD":
-      // 14th of each month
-      let seriesDDate = new Date(currentYear, currentMonth, 14);
-      if (currentDate > 14) {
-        seriesDDate = new Date(currentYear, currentMonth + 1, 14);
-      }
-      return seriesDDate;
-
-    default:
-      return new Date();
-  }
-};
-
-const getYearlyPayments = (series) => {
-  switch (series) {
-    case "weekly":
-      return 52; // Weekly payments
-    case "seriesA":
-    case "seriesB":
-    case "seriesC":
-    case "seriesD":
-      return 13; // 13 payments per year
-    default:
-      return 12;
-  }
-};
+  ETF_DATA,
+  STATUS_STYLES,
+  GROUP_ORDER,
+  getETFStatus,
+} from "../../data/etfMetadata";
 
 const DashboardGrid = () => {
-  const [etfs, setEtfs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Get today's date
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth() + 1; // getMonth() returns 0-11
-
-  // Function to get the distribution based on today's date
-  const getTodaysDistribution = (ticker) => {
-    const distribution = getDistribution(ticker, currentYear, currentMonth);
-    return distribution || "TBD";
-  };
+  const { etfs = [], totalValue = 0, totalShares = 0 } = usePortfolio() || {};
+  const {
+    getLatestDistribution,
+    getPaymentsPerYear,
+    distributions = {},
+    loading,
+  } = useDistributions() || {};
+  const [prices, setPrices] = useState({});
+  const [pricesLoading, setPricesLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await axios.get(`${API_URL}/prices/latest`);
-        setEtfs(response.data);
-        setLoading(false);
-      } catch (error) {
-        setError("Failed to fetch ETF data");
-        setLoading(false);
+    const unsubscribe = onSnapshot(
+      collection(db, "prices"),
+      (snapshot) => {
+        const priceData = {};
+        snapshot.forEach((doc) => {
+          priceData[doc.id] = doc.data().currentPrice;
+        });
+        setPrices(priceData);
+        setPricesLoading(false);
+      },
+      (error) => {
+        console.error("Error fetching prices:", error);
+        setPricesLoading(false);
       }
-    };
+    );
 
-    fetchData();
+    return () => unsubscribe();
   }, []);
 
-  const groupETFsByDistribution = (etfs) => {
-    const weeklyTickers = ["YMAG", "YMAX", "LFGY", "GPTY"];
-    const groupATickers = [
-      "TSLY",
-      "GOOY",
-      "YBIT",
-      "OARK",
-      "XOMO",
-      "TSMY",
-      "CRSH",
-      "FIVY",
-      "FEAT",
-    ];
-    const groupBTickers = [
-      "NVDY",
-      "FBY",
-      "GDXY",
-      "JPMO",
-      "MRNY",
-      "MARO",
-      "PLTY",
-    ];
-    const groupCTickers = [
-      "CONY",
-      "MSFO",
-      "AMDY",
-      "NFLY",
-      "PYPY",
-      "ULTY",
-      "ABNY",
-    ];
-    const groupDTickers = [
-      "MSTY",
-      "AMZY",
-      "APLY",
-      "DISO",
-      "SQY",
-      "SMCY",
-      "AIYY",
-    ];
+  const calculateAnnualYield = (etf) => {
+    if (!etf?.ticker || !prices) return "N/A";
 
-    const grouped = etfs.reduce((acc, etf) => {
-      let distribution;
+    const price = prices[etf.ticker];
+    const distribution = getLatestDistribution(etf.ticker);
 
-      if (weeklyTickers.includes(etf.ticker)) {
-        distribution = "weekly";
-      } else if (groupATickers.includes(etf.ticker)) {
-        distribution = "seriesA";
-      } else if (groupBTickers.includes(etf.ticker)) {
-        distribution = "seriesB";
-      } else if (groupCTickers.includes(etf.ticker)) {
-        distribution = "seriesC";
-      } else if (groupDTickers.includes(etf.ticker)) {
-        distribution = "seriesD";
-      } else {
-        distribution = "unknown";
-      }
+    if (
+      !price ||
+      distribution === "TBD" ||
+      distribution === "N/A" ||
+      isNaN(distribution)
+    ) {
+      return "TBD";
+    }
 
-      if (!acc[distribution]) {
-        acc[distribution] = [];
-      }
-      acc[distribution].push({
-        ...etf,
-        distribution: DISTRIBUTIONS[etf.ticker] || 0, // Add distribution from DISTRIBUTIONS
-      });
-      return acc;
-    }, {});
-
-    return grouped;
+    const paymentsPerYear = getPaymentsPerYear(etf.ticker);
+    return (((distribution * paymentsPerYear) / price) * 100).toFixed(2);
   };
 
-  const groupedETFs = groupETFsByDistribution(etfs);
+  const calculateMonthlyIncome = () => {
+    if (!etfs || !Array.isArray(etfs)) return 0;
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-      </div>
-    );
+    return etfs.reduce((total, etf) => {
+      const distribution = getLatestDistribution(etf?.ticker?.toUpperCase());
+      if (!distribution || distribution === "N/A" || distribution === "TBD")
+        return total;
+
+      const paymentsPerYear = getPaymentsPerYear(etf?.ticker?.toUpperCase());
+      const yearlyAmount = distribution * paymentsPerYear;
+      const monthlyAmount = yearlyAmount / 12;
+      return total + monthlyAmount * (etf?.shares || 0);
+    }, 0);
+  };
+
+  const getNextDistributionDate = (frequency) => {
+    const today = new Date();
+    let nextDate = new Date();
+
+    switch (frequency) {
+      case "weekly":
+        nextDate.setDate(today.getDate() + ((5 + 7 - today.getDay()) % 7));
+        break;
+      case "13x":
+        const daysUntilNext13x =
+          28 -
+          (Math.floor((today - new Date(2024, 0, 1)) / (1000 * 60 * 60 * 24)) %
+            28);
+        nextDate.setDate(today.getDate() + daysUntilNext13x);
+        break;
+      default:
+        nextDate.setMonth(today.getMonth() + 1, 1);
+        break;
+    }
+
+    return nextDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const groupedETFs = Object.entries(ETF_DATA).reduce((acc, [ticker, data]) => {
+    const { group } = data;
+
+    if (!acc[group]) {
+      acc[group] = [];
+    }
+
+    acc[group].push({
+      ticker,
+      ...data,
+      currentPrice: prices[ticker] || "TBD",
+      distribution: getLatestDistribution(ticker) || "TBD",
+      ...distributions[ticker],
+    });
+
+    return acc;
+  }, {});
+
+  if (loading || pricesLoading) {
+    return <div className="text-center py-4">Loading...</div>;
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 p-4 rounded-lg text-red-700">
-        Error loading ETF data: {error}
-      </div>
+  const monthlyIncome = calculateMonthlyIncome();
+
+  const renderETFRow = (etf) => {
+    const status = getETFStatus(
+      prices[etf.ticker],
+      getLatestDistribution(etf.ticker)
     );
-  }
+    const statusStyles = STATUS_STYLES[status];
 
-  return (
-    <div className="space-y-6">
-      {Object.entries(groupedETFs).map(([distribution, etfs]) => {
-        const { bgColor, headerBgColor, textColor } =
-          getSeriesColorClasses(distribution);
-        const yearlyPayments = getYearlyPayments(distribution);
+    // Find if this ETF exists in Firebase portfolio
+    const portfolioEntry = etfs.find(
+      (p) => p.ticker === etf.ticker && p.totalShares > 0 // Use totalShares from Firebase instead of shares
+    );
 
-        return (
-          <div
-            key={distribution}
-            className={`${bgColor} rounded-lg shadow-sm overflow-hidden`}
-          >
-            <div
-              className={`px-6 py-4 border-b border-gray-200 ${headerBgColor}`}
-            >
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className={`text-lg font-medium ${textColor} capitalize`}>
-                    {distribution}
-                  </h2>
-                </div>
-                <div
-                  className={`text-sm ${textColor} opacity-75 flex items-center`}
-                >
-                  <Calendar className="inline-block w-4 h-4 mr-1" />
-                  Next Distribution:{" "}
-                  {getNextDistributionDate(distribution).toLocaleDateString(
-                    "en-US",
-                    {
-                      month: "numeric",
-                      day: "numeric",
-                      year: "numeric",
-                    }
+    const isHeld = !!portfolioEntry;
+
+    const heldStyles = isHeld
+      ? "bg-blue-100 border-l-4 border-blue-500"
+      : "hover:bg-gray-50";
+
+    return (
+      <tr key={etf.ticker} className={`${heldStyles} transition-colors`}>
+        <td className="px-4 py-3">
+          <div className="flex items-center">
+            <div>
+              <span
+                className={`font-medium ${
+                  isHeld ? "text-blue-600" : "text-gray-900"
+                }`}
+              >
+                {etf.ticker}
+              </span>
+              {isHeld && (
+                <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {portfolioEntry.group || "In Portfolio"}
+                </span>
+              )}
+              <p className="text-xs text-gray-500">{etf.name}</p>
+              {isHeld && (
+                <div className="text-xs">
+                  <p className="text-blue-600 font-medium">
+                    Holdings: {portfolioEntry.totalShares.toLocaleString()}{" "}
+                    shares
+                  </p>
+                  {portfolioEntry.purchaseDate && (
+                    <p className="text-gray-500">
+                      Added:{" "}
+                      {new Date(
+                        portfolioEntry.purchaseDate
+                      ).toLocaleDateString()}
+                    </p>
                   )}
                 </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-              {etfs.map((etf) => {
-                const monthlyDist = getTodaysDistribution(etf.ticker);
-                const yearlyDist =
-                  monthlyDist === "TBD" ? "TBD" : monthlyDist * yearlyPayments;
-
-                return (
-                  <div
-                    key={etf.ticker}
-                    className="bg-white rounded-lg p-4 shadow-sm"
-                  >
-                    <div className="mb-2">
-                      <h3 className="text-lg font-medium">{etf.ticker}</h3>
-                      <p className="text-sm text-gray-500">{etf.name}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <p className="text-sm text-gray-500 flex items-center">
-                          <DollarSign className="w-4 h-4 mr-1" /> Price
-                        </p>
-                        <p className="text-lg font-medium">
-                          ${etf.price?.toFixed(2) || "N/A"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500 flex items-center">
-                          <CircleDollarSign className="w-4 h-4 mr-1" /> Monthly
-                          Dist.
-                        </p>
-                        <p className="text-lg font-medium">
-                          {monthlyDist === "TBD"
-                            ? "TBD"
-                            : `$${monthlyDist.toFixed(2)}`}
-                          <span className="text-xs text-gray-500 block">
-                            {yearlyDist === "TBD"
-                              ? "TBD"
-                              : `$${yearlyDist.toFixed(
-                                  2
-                                )}/yr (${yearlyPayments}x)`}
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 pt-2 border-t">
-                      <p className="text-sm text-gray-500">
-                        Yield:{" "}
-                        {yearlyDist === "TBD"
-                          ? "TBD"
-                          : `${((yearlyDist / etf.price) * 100).toFixed(2)}%`}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+              )}
             </div>
           </div>
-        );
-      })}
+        </td>
+        <td className="px-4 py-3">
+          <span
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusStyles.bg} ${statusStyles.text}`}
+          >
+            {etf.frequency}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <div>
+            <span className="font-medium">
+              ${prices[etf.ticker]?.toFixed(2) || "TBD"}
+            </span>
+            <p className="text-xs text-gray-500">Inception: {etf.inception}</p>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <span className={`font-medium ${statusStyles.text}`}>
+            {getLatestDistribution(etf.ticker) === "TBD" ||
+            getLatestDistribution(etf.ticker) === "N/A"
+              ? getLatestDistribution(etf.ticker)
+              : `$${getLatestDistribution(etf.ticker)}`}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <span
+            className={`font-medium ${
+              calculateAnnualYield(etf) !== "TBD" &&
+              Number(calculateAnnualYield(etf)) > 15
+                ? "text-green-600"
+                : statusStyles.text
+            }`}
+          >
+            {calculateAnnualYield(etf) === "TBD"
+              ? "TBD"
+              : `${calculateAnnualYield(etf)}%`}
+          </span>
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <div className="space-y-8 p-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Portfolio Value
+            </h2>
+            <DollarSign className="h-5 w-5 text-gray-400" />
+          </div>
+          <p className="mt-2 text-3xl font-bold text-gray-900">
+            $
+            {(totalValue || 0).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Monthly Income
+            </h2>
+            <BarChart3 className="h-5 w-5 text-gray-400" />
+          </div>
+          <p className="mt-2 text-3xl font-bold text-gray-900">
+            $
+            {(monthlyIncome || 0).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Total Shares
+            </h2>
+            <PieChart className="h-5 w-5 text-gray-400" />
+          </div>
+          <p className="mt-2 text-3xl font-bold text-gray-900">
+            {(totalShares || 0).toLocaleString("en-US")}
+          </p>
+        </div>
+      </div>
+
+      {GROUP_ORDER.map((groupName) => (
+        <div key={groupName} className="rounded-lg overflow-hidden shadow-lg">
+          <div
+            className={`flex justify-between items-center p-4 ${STATUS_STYLES.active.bg} ${STATUS_STYLES.active.text}`}
+          >
+            <h2 className="text-xl font-bold">{groupName.replace("_", " ")}</h2>
+            <div className="text-sm font-medium">
+              Next Distribution:{" "}
+              {getNextDistributionDate(groupedETFs[groupName]?.[0]?.frequency)}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
+                    ETF Details
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
+                    Frequency
+                  </th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
+                    Price Info
+                  </th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
+                    Latest Distribution
+                  </th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
+                    Annual Yield
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {groupedETFs[groupName]?.map(renderETFRow)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
     </div>
   );
 };

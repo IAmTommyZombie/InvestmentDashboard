@@ -1,17 +1,24 @@
 import React from "react";
-import DashboardLayout from "./components/layout/DashboardLayouot";
+import DashboardLayout from "./components/layout/DashboardLayout";
 import DashboardGrid from "./components/dashboard/DashboardGrid";
 import { PortfolioProvider } from "./context/PortfolioContext";
 import AddETFForm from "./components/portfolio/AddETFForm";
+import DistributionAdmin from "./components/admin/DistributionAdmin";
+import { AuthProvider } from "./context/AuthContext";
+import { DistributionProvider } from "./context/DistributionContext";
 
 const App = () => {
   return (
-    <PortfolioProvider>
-      <DashboardLayout>
-        <DashboardGrid />
-        <AddETFForm />
-      </DashboardLayout>
-    </PortfolioProvider>
+    <AuthProvider>
+      <DistributionProvider>
+        <PortfolioProvider>
+          <DashboardLayout>
+            <DashboardGrid />
+            <AddETFForm />
+          </DashboardLayout>
+        </PortfolioProvider>
+      </DistributionProvider>
+    </AuthProvider>
   );
 };
 

@@ -1,5 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Briefcase, Building } from "lucide-react";
+import {
+  LayoutDashboard,
+  Briefcase,
+  Building,
+  ClipboardList,
+  Settings,
+} from "lucide-react";
 
 const Navigation = () => {
   const baseStyles =
@@ -35,6 +41,24 @@ const Navigation = () => {
       >
         <Building className="w-5 h-5" />
         <span>Austin</span>
+      </NavLink>
+      <NavLink
+        to="/distributions"
+        className={({ isActive }) =>
+          `${baseStyles} ${isActive ? activeStyles : inactiveStyles}`
+        }
+      >
+        <ClipboardList className="w-5 h-5" />
+        <span>Distributions</span>
+      </NavLink>
+      <NavLink
+        to="/admin/distributions"
+        className={({ isActive }) =>
+          `${baseStyles} ${isActive ? activeStyles : inactiveStyles}`
+        }
+      >
+        <Settings className="w-5 h-5" />
+        <span>Distribution Admin</span>
       </NavLink>
     </nav>
   );

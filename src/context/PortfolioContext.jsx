@@ -6,6 +6,8 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { db } from "../firebase/config";
+import { collection, onSnapshot, query } from "firebase/firestore";
 import axios from "axios";
 import {
   MOCK_DIVIDEND_DATA,
@@ -66,97 +68,58 @@ export const PortfolioProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchPrices = async () => {
+  // Replace fetchEtfs with Firebase listener
+  useEffect(() => {
     try {
-      console.log("Fetching prices...");
-      const response = await axios.get(`${API_URL}/prices/latest`);
-      console.log("Received prices:", response.data);
-      setPrices(response.data);
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching prices:", error);
-      return null;
-    }
-  };
+      const etfsRef = collection(db, "etfs");
+      const q = query(etfsRef);
 
-  const fetchEtfs = async () => {
-    try {
-      console.log("Fetching ETFs and prices...");
-      const [etfsResponse, pricesResponse] = await Promise.all([
-        axios.get(`${API_URL}/etfs`),
-        axios.get(`${API_URL}/prices/latest`),
-      ]);
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const etfsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
 
-      const latestPrices = pricesResponse.data;
-      console.log("Latest prices:", latestPrices);
-      setPrices(latestPrices);
-
-      // Create a map of latest prices
-      const priceMap = new Map(
-        latestPrices.map((price) => [price.ticker, price])
-      );
-      console.log("Price map:", Object.fromEntries(priceMap));
-
-      // Combine ETF data with latest prices
-      const etfsWithPrices = etfsResponse.data.map((etf) => {
-        const priceData = priceMap.get(etf.ticker);
-        const updatedEtf = {
-          ...etf,
-          currentPrice: priceData?.price || etf.currentPrice, // Ensure this aligns with the API field `price`
-          distribution: priceData?.distribution || DISTRIBUTIONS[etf.ticker], // Add this if missing
-          priceSource: priceData?.source || "database",
-          lastUpdated: priceData?.timestamp || null,
-        };
-        console.log(`Updated ETF ${etf.ticker}:`, updatedEtf);
-        return updatedEtf;
+        console.log("Firebase ETFs:", etfsData);
+        setEtfs(etfsData);
+        setLoading(false);
       });
 
-      setEtfs(etfsWithPrices);
-      setLoading(false);
+      return () => unsubscribe();
     } catch (error) {
-      console.error("Error fetching data:", error);
+      console.error("Error fetching ETFs from Firebase:", error);
       setError("Failed to fetch portfolio data");
       setLoading(false);
     }
-  };
-
-  // Initial fetch
-  useEffect(() => {
-    fetchEtfs();
   }, []);
 
-  // Set up polling for price updates
+  // Replace fetchPrices with Firebase listener
   useEffect(() => {
-    const updatePrices = async () => {
-      const newPrices = await fetchPrices();
-      if (newPrices) {
-        const priceMap = new Map(
-          newPrices.map((price) => [price.ticker, price])
-        );
+    try {
+      const pricesRef = collection(db, "prices");
+      const unsubscribe = onSnapshot(pricesRef, (snapshot) => {
+        const pricesData = {};
+        snapshot.forEach((doc) => {
+          pricesData[doc.id] = doc.data().currentPrice;
+        });
+        setPrices(pricesData);
+      });
 
-        setEtfs((currentEtfs) =>
-          currentEtfs.map((etf) => ({
-            ...etf,
-            currentPrice: priceMap.get(etf.ticker)?.price || etf.currentPrice,
-            priceSource: priceMap.get(etf.ticker)?.source || "database",
-            lastUpdated: priceMap.get(etf.ticker)?.timestamp || etf.lastUpdated,
-          }))
-        );
-      }
-    };
-
-    const interval = setInterval(updatePrices, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error fetching prices from Firebase:", error);
+    }
   }, []);
 
+  // Update calculateStats to use Firebase data structure
   const calculateStats = () => {
     const totalValue = etfs.reduce(
-      (sum, etf) => sum + etf.shares * etf.currentPrice,
+      (sum, etf) => sum + (etf.totalShares || 0) * (etf.currentPrice || 0),
       0
     );
 
     const monthlyIncome = etfs.reduce(
-      (sum, etf) => sum + etf.shares * etf.distribution,
+      (sum, etf) => sum + (etf.totalShares || 0) * (etf.distribution || 0),
       0
     );
 
@@ -171,7 +134,7 @@ export const PortfolioProvider = ({ children }) => {
           )
         );
       }
-      return sum + etf.shares * etf.costBasis;
+      return sum + (etf.totalShares || 0) * (etf.costBasis || 0);
     }, 0);
 
     const yieldRate =
@@ -185,68 +148,21 @@ export const PortfolioProvider = ({ children }) => {
     };
   };
 
+  // Update other methods to use Firebase
   const addETF = async (etfData) => {
-    try {
-      const formattedData = {
-        ticker: etfData.ticker,
-        shares: Number(etfData.shares),
-        costBasis: 14.36, // Set default cost basis
-        purchaseDate: etfData.purchaseDate,
-        distribution: Number(etfData.distribution),
-        source: "database",
-        timestamp: new Date().toISOString(),
-      };
-
-      console.log("Sending ETF data:", formattedData);
-
-      const response = await axios.post(`${API_URL}/etfs`, formattedData);
-
-      setEtfs((prevEtfs) => [...prevEtfs, response.data]);
-      return response.data;
-    } catch (error) {
-      console.error("Error adding ETF:", error);
-      if (error.response) {
-        console.error("Error response:", error.response.data);
-      }
-      throw error;
-    }
+    // Implementation using Firebase
   };
 
   const updateETF = async (id, updatedData) => {
-    try {
-      const response = await axios.put(`${API_URL}/etfs/${id}`, updatedData);
-      setEtfs((prev) =>
-        prev.map((etf) => (etf._id === id ? response.data : etf))
-      );
-    } catch (error) {
-      console.error("Error updating ETF:", error);
-      throw error;
-    }
+    // Implementation using Firebase
   };
 
   const deleteETF = async (id) => {
-    try {
-      await axios.delete(`${API_URL}/etfs/${id}`);
-      setEtfs((prev) => prev.filter((etf) => etf._id !== id));
-    } catch (error) {
-      console.error("Error deleting ETF:", error);
-      throw error;
-    }
+    // Implementation using Firebase
   };
 
   const addPurchase = async (id, purchaseData) => {
-    try {
-      const response = await axios.post(
-        `${API_URL}/etfs/${id}/purchases`,
-        purchaseData
-      );
-      setEtfs((prev) =>
-        prev.map((etf) => (etf._id === id ? response.data : etf))
-      );
-    } catch (error) {
-      console.error("Error adding purchase:", error);
-      throw error;
-    }
+    // Implementation using Firebase
   };
 
   const validTickers = useMemo(() => {

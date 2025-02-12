@@ -1,8 +1,38 @@
 const { chromium } = require("playwright");
 const schedule = require("node-schedule");
-const mongoose = require("mongoose");
-const PriceHistory = require("../models/priceHistory");
+const { initializeApp } = require("firebase/app");
+const {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  Timestamp,
+} = require("firebase/firestore");
 const { FALLBACK_PRICES } = require("../config/fallbackPrices");
+require("dotenv").config();
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCBZLT3rgxVorNPu5iKdGDV4QL1JBKidZA",
+  authDomain: "investment-dashboard-77e78.firebaseapp.com",
+  projectId: "investment-dashboard-77e78",
+  storageBucket: "investment-dashboard-77e78.firebasestorage.app",
+  messagingSenderId: "412792088409",
+  appId: "1:412792088409:web:cf4317d151df3211d64e48",
+};
+
+// Initialize Firebase
+console.log("Initializing Firebase...");
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+console.log("Initializing Firebase with config:", {
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain,
+});
+
+// After initializing Firebase
+console.log("Firebase initialized, database instance created");
 
 async function setupBrowser() {
   return await chromium.launch({
@@ -91,7 +121,7 @@ async function scrapePrices() {
           results.push({
             ticker,
             price,
-            timestamp: new Date(),
+            timestamp: Timestamp.now(),
             source,
           });
         } catch (error) {
@@ -101,7 +131,7 @@ async function scrapePrices() {
           results.push({
             ticker,
             price: FALLBACK_PRICES[ticker].price,
-            timestamp: new Date(),
+            timestamp: Timestamp.now(),
             source: "fallback",
           });
         }
@@ -127,26 +157,25 @@ async function scrapePrices() {
   }
 }
 
-async function savePricesToDB(prices) {
-  try {
-    console.log("Attempting to save prices to database...");
+async function savePricesToFirebase(prices) {
+  console.log(`\nSaving ${prices.length} prices to Firebase...`);
 
-    if (mongoose.connection.readyState !== 1) {
-      console.log("Connecting to MongoDB...");
-      await mongoose.connect("mongodb://localhost:27017/portfolio");
-      console.log("Connected to MongoDB");
+  for (const priceData of prices) {
+    try {
+      console.log(`Saving ${priceData.ticker} at $${priceData.price}...`);
+
+      const priceRef = doc(collection(db, "prices"), priceData.ticker);
+      await setDoc(priceRef, {
+        currentPrice: priceData.price,
+        lastUpdated: priceData.timestamp,
+        source: priceData.source,
+        ticker: priceData.ticker,
+      });
+
+      console.log(`✓ Saved ${priceData.ticker}`);
+    } catch (error) {
+      console.error(`Error saving ${priceData.ticker}:`, error);
     }
-
-    for (const priceData of prices) {
-      const priceHistory = new PriceHistory(priceData);
-      await priceHistory.save();
-      console.log(`Saved price for ${priceData.ticker}: $${priceData.price}`);
-    }
-
-    console.log(`Successfully saved ${prices.length} prices to database`);
-  } catch (error) {
-    console.error("Database error:", error);
-    throw error;
   }
 }
 
@@ -154,7 +183,12 @@ async function updatePrices() {
   console.log("Starting price update process...");
   try {
     const { results, errors } = await scrapePrices();
-    await savePricesToDB(results);
+    console.log(
+      "Prices scraped, attempting to save to Firebase:",
+      results.length,
+      "items"
+    );
+    await savePricesToFirebase(results);
 
     console.log("\n=== Price Update Summary ===");
     console.log(`Timestamp: ${new Date().toISOString()}`);
@@ -176,13 +210,34 @@ async function updatePrices() {
 
 function startScheduler() {
   console.log("Starting price update scheduler...");
-  const marketCloseJob = schedule.scheduleJob("1 16 * * 1-5", updatePrices);
-  console.log("Scheduler started. Will run at 4:01 PM ET on weekdays.");
 
+  // Schedule for 4:01 PM ET on weekdays
+  const marketCloseJob = schedule.scheduleJob("1 16 * * 1-5", async () => {
+    console.log("Running scheduled price update...");
+    try {
+      await updatePrices();
+      console.log("Scheduled update completed successfully");
+    } catch (error) {
+      console.error("Scheduled update failed:", error);
+    }
+  });
+
+  // Schedule for 9:31 AM ET on weekdays
+  const marketOpenJob = schedule.scheduleJob("31 9 * * 1-5", async () => {
+    console.log("Running market open price update...");
+    try {
+      await updatePrices();
+      console.log("Market open update completed successfully");
+    } catch (error) {
+      console.error("Market open update failed:", error);
+    }
+  });
+
+  // Run initial update
   console.log("Running initial price update...");
   updatePrices();
 
-  return marketCloseJob;
+  return { marketCloseJob, marketOpenJob };
 }
 
 if (require.main === module) {
@@ -191,7 +246,7 @@ if (require.main === module) {
 
 module.exports = {
   scrapePrices,
-  savePricesToDB,
+  savePricesToFirebase,
   updatePrices,
   startScheduler,
 };

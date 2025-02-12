@@ -1,3 +1,6 @@
+import { db } from "../firebase/config";
+import { collection, query, where, getDocs } from "firebase/firestore";
+
 export const DISTRIBUTIONS = {
   // Weekly distributions
   YMAG: {
@@ -325,40 +328,36 @@ export const DISTRIBUTIONS = {
   },
 };
 
-// Helper function to get distribution for a specific ETF in a given month/year
-export const getDistribution = (ticker, year, month) => {
-  if (DISTRIBUTIONS[ticker]?.history?.[year]?.[month] !== undefined) {
-    return DISTRIBUTIONS[ticker].history[year][month];
+// Helper function to get frequency multiplier (still needed for calculations)
+export const getFrequencyMultiplier = (ticker) => {
+  const weeklyETFs = ["YMAG", "YMAX", "LFGY", "GPTY"];
+  if (weeklyETFs.includes(ticker)) {
+    return 52 / 12; // Weekly to monthly conversion
   }
-
-  // Find latest available distribution
-  const years = Object.keys(DISTRIBUTIONS[ticker]?.history || {}).sort(
-    (a, b) => b - a
-  );
-  for (const y of years) {
-    const months = Object.keys(DISTRIBUTIONS[ticker].history[y]).sort(
-      (a, b) => b - a
-    );
-    for (const m of months) {
-      const dist = DISTRIBUTIONS[ticker].history[y][m];
-      if (dist !== "TBD" && typeof dist === "number") {
-        return dist;
-      }
-    }
-  }
-
-  return 0;
+  return 1; // Monthly ETFs
 };
 
-export const getFrequencyMultiplier = (ticker) => {
-  const frequency = DISTRIBUTIONS[ticker]?.frequency;
-  switch (frequency) {
-    case "weekly":
-      return 52 / 12;
-    case "13x":
-      return 13 / 12;
-    default:
-      return 1; // monthly
+// Get distribution from Firebase
+export const getDistribution = async (ticker, year, month) => {
+  try {
+    const distributionsRef = collection(db, "distributions");
+    const q = query(
+      distributionsRef,
+      where("ticker", "==", ticker),
+      where("year", "==", year),
+      where("month", "==", month)
+    );
+
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+      return snapshot.docs[0].data().amount;
+    }
+
+    return 0; // Return 0 if no distribution found
+  } catch (error) {
+    console.error(`Error getting distribution for ${ticker}:`, error);
+    return 0;
   }
 };
 
