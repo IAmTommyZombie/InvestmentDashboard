@@ -2,11 +2,9 @@ services:
   - type: web
     name: investment-dashboard-scraper
     env: node
-    buildCommand: |
-      cd server
-      npm install --production
+    buildCommand: cd server && npm install --no-optional
     startCommand: node server/index.js
     envVars:
       - key: NODE_VERSION
-        value: 18.x
+        value: 16.x
     plan: free
