@@ -3,17 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://iamtommyzombie.github.io/InvestmentDashboard",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist",
-    "start": "node server/index.js",
-    "migrate": "node scripts/migrateToFirebase.js",
-    "setup-firebase": "node scripts/setupFirebase.js"
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
