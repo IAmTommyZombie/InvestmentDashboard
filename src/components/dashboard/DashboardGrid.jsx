@@ -105,44 +105,61 @@ const DashboardGrid = () => {
     setStatus((prev) => ({ ...prev, [ticker]: "⏳ Scraping price..." }));
 
     try {
-      const response = await fetch("http://localhost:3000/scrape-price", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ticker }),
-      });
-
-      const data = await response.json();
+      const response = await fetch(
+        "https://investment-dashboard-scraper.onrender.com/scrape-price",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ticker }),
+        }
+      );
 
       if (!response.ok) {
-        console.error("Server error details:", data);
-        throw new Error(data.error || `Failed to scrape price for ${ticker}`);
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Server error details:", errorData);
+        throw new Error(
+          errorData.error || `Failed to scrape price for ${ticker}`
+        );
       }
 
-      console.log(`Received scraped data for ${ticker}:`, data);
+      const data = await response.json();
+      console.log(`Received response for ${ticker}:`, data);
 
-      // Get the updated price from Firestore to verify
+      // Add delay between Firestore operations
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Get the updated price from Firestore
       const priceRef = doc(db, "prices", ticker);
-      const priceDoc = await getDoc(priceRef);
+      let retries = 3;
+      let priceDoc;
+
+      while (retries > 0) {
+        try {
+          priceDoc = await getDoc(priceRef);
+          break;
+        } catch (error) {
+          console.warn(`Retry ${4 - retries} failed for ${ticker}:`, error);
+          retries--;
+          if (retries === 0) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
 
       if (!priceDoc.exists()) {
         throw new Error(`No price data found for ${ticker}`);
       }
 
-      const priceData = priceDoc.data();
-      console.log(`Firestore data for ${ticker}:`, priceData);
+      const currentPrice = priceDoc.data().currentPrice;
+      console.log(`Got fresh price for ${ticker}:`, currentPrice);
 
-      // Update local state with verification
       setPrices((prev) => {
         const newPrices = {
           ...prev,
-          [ticker]: priceData.currentPrice,
+          [ticker]: currentPrice,
         };
-        console.log(`Updating prices state for ${ticker}:`, {
-          oldPrice: prev[ticker],
-          newPrice: priceData.currentPrice,
-        });
+        console.log("New prices state:", newPrices);
         return newPrices;
       });
 
@@ -366,6 +383,39 @@ const DashboardGrid = () => {
 
   return (
     <div className="space-y-8 p-4">
+      {window.location.hostname === "iamtommyzombie.github.io" && (
+        <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-blue-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700">
+                This is a demo version. To use price updates, please run the
+                application locally.
+                <a
+                  href="https://github.com/IAmTommyZombie/InvestmentDashboard"
+                  className="font-medium underline ml-1"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View on GitHub
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between">
@@ -449,7 +499,11 @@ const DashboardGrid = () => {
                       : "bg-blue-600 hover:bg-blue-700 text-white"
                   }`}
                 >
-                  {groupProgress[group] ? "Updating..." : "Update Group"}
+                  {window.location.hostname === "iamtommyzombie.github.io"
+                    ? "Demo Mode"
+                    : groupProgress[group]
+                    ? "Updating..."
+                    : "Update Group"}
                 </button>
               </div>
             </div>
