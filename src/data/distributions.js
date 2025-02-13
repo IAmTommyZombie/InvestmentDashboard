@@ -339,8 +339,18 @@ export const getFrequencyMultiplier = (ticker) => {
 
 // Get distribution from Firebase
 export const getDistribution = async (ticker, year, month) => {
+  // Add input validation
+  if (!ticker || !year || month === undefined) {
+    console.warn("Invalid parameters for getDistribution:", {
+      ticker,
+      year,
+      month,
+    });
+    return 0;
+  }
+
   try {
-    const distributionsRef = collection(db, "distributions");
+    const distributionsRef = collection(db, "yahoo_distributions");
     const q = query(
       distributionsRef,
       where("ticker", "==", ticker),

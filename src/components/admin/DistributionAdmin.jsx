@@ -68,28 +68,32 @@ const DistributionAdmin = () => {
     if (!selectedETF || !amount) return;
 
     try {
-      const distributionRef = doc(collection(db, "distributions"), selectedETF);
+      const distributionRef = doc(db, "distributions", selectedETF);
+      const distributionData = distributions[selectedETF] || {
+        ticker: selectedETF,
+        history: {},
+      };
 
-      // First, try to create/update the document with initial structure
-      await setDoc(
-        distributionRef,
-        {
-          ticker: selectedETF,
-          history: {
-            [year]: {
-              [month]: amount === "TBD" ? "TBD" : parseFloat(amount),
-            },
-          },
-        },
-        { merge: true }
-      ); // merge: true will update existing data without overwriting
+      // Create year object if it doesn't exist
+      if (!distributionData.history[year]) {
+        distributionData.history[year] = {};
+      }
+
+      // Update the specific month
+      distributionData.history[year][month] =
+        amount === "TBD" ? "TBD" : parseFloat(amount);
+
+      console.log("Saving distribution data:", distributionData);
+
+      // Save the entire updated document
+      await setDoc(distributionRef, distributionData);
 
       setAmount("");
       setEditMode(false);
       alert("Distribution updated successfully!");
     } catch (error) {
       console.error("Error updating distribution:", error);
-      alert("Error updating distribution");
+      alert("Error updating distribution: " + error.message);
     }
   };
 
@@ -106,12 +110,93 @@ const DistributionAdmin = () => {
     });
   };
 
+  const renderDistributionTable = () => {
+    return (
+      <div className="mt-8 bg-white shadow rounded-lg overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                ETF
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Frequency
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Latest Distribution
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Date
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {Object.entries(DISTRIBUTIONS).map(([ticker, etfData]) => {
+              const distribution = distributions[ticker];
+              let latestAmount = "No data";
+              let latestDate = "";
+
+              if (distribution?.history) {
+                const years = Object.keys(distribution.history).sort(
+                  (a, b) => b - a
+                );
+                for (const year of years) {
+                  const months = Object.keys(distribution.history[year]).sort(
+                    (a, b) => b - a
+                  );
+                  if (months.length > 0) {
+                    const month = months[0];
+                    const amount = distribution.history[year][month];
+                    latestAmount = amount === "TBD" ? "TBD" : `$${amount}`;
+                    latestDate = `${getMonthName(month)} ${year}`;
+                    break;
+                  }
+                }
+              }
+
+              return (
+                <tr key={ticker}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {ticker}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {etfData.frequency}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {latestAmount}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {latestDate}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <button
+                      onClick={() => {
+                        setSelectedETF(ticker);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      View History
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   if (loading) {
     return <div className="p-4">Loading...</div>;
   }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="p-4 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Distribution Admin</h1>
         <button
@@ -275,6 +360,11 @@ const DistributionAdmin = () => {
           </div>
         </div>
       )}
+
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold mb-4">All ETF Distributions</h2>
+        {renderDistributionTable()}
+      </div>
     </div>
   );
 };

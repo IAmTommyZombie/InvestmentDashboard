@@ -1,8 +1,36 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { db } from "../../firebase/config";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, onSnapshot } from "firebase/firestore";
 import { availableETFs } from "../../data/availableETFs";
 import { X, ChevronDown } from "lucide-react";
+
+// Add the ETF_GROUPS constant at the top
+const ETF_GROUPS = {
+  WEEKLY: ["YMAG", "YMAX", "LFGY", "GPTY"],
+  GROUP_A: [
+    "TSLY",
+    "GOOY",
+    "YBIT",
+    "OARK",
+    "XOMO",
+    "TSMY",
+    "CRSH",
+    "FIVY",
+    "FEAT",
+  ],
+  GROUP_B: ["NVDY", "FBY", "GDXY", "JPMO", "MRNY", "MARO", "PLTY"],
+  GROUP_C: ["CONY", "MSFO", "AMDY", "NFLY", "PYPY", "ULTY", "ABNY"],
+  GROUP_D: ["MSTY", "AMZY", "APLY", "DISO", "SQY", "SMCY", "AIYY"],
+};
+
+// Add group names for better display
+const GROUP_NAMES = {
+  WEEKLY: "Weekly Distributions",
+  GROUP_A: "Group A - 13x/Year",
+  GROUP_B: "Group B - 13x/Year",
+  GROUP_C: "Group C - Monthly",
+  GROUP_D: "Group D - Monthly",
+};
 
 const AddETFForm = ({ onClose }) => {
   const [formData, setFormData] = useState({
@@ -11,16 +39,74 @@ const AddETFForm = ({ onClose }) => {
     group: "",
     purchaseDate: new Date().toISOString().split("T")[0],
   });
+  const [prices, setPrices] = useState({});
+  const [distributions, setDistributions] = useState({});
 
-  // Group ETFs by their group
+  // Add price and distribution listeners
+  useEffect(() => {
+    const priceUnsubscribe = onSnapshot(
+      collection(db, "prices"),
+      (snapshot) => {
+        const priceData = {};
+        snapshot.forEach((doc) => {
+          priceData[doc.id] = doc.data();
+        });
+        setPrices(priceData);
+      }
+    );
+
+    const distributionUnsubscribe = onSnapshot(
+      collection(db, "distributions"),
+      (snapshot) => {
+        const distData = {};
+        snapshot.forEach((doc) => {
+          distData[doc.id] = doc.data();
+        });
+        setDistributions(distData);
+      }
+    );
+
+    return () => {
+      priceUnsubscribe();
+      distributionUnsubscribe();
+    };
+  }, []);
+
+  // Update the grouping logic
   const groupedETFs = availableETFs.reduce((acc, etf) => {
-    const group = etf.group;
+    let group =
+      Object.entries(ETF_GROUPS).find(([_, tickers]) =>
+        tickers.includes(etf.ticker)
+      )?.[0] || "OTHER";
+
     if (!acc[group]) {
       acc[group] = [];
     }
     acc[group].push(etf);
     return acc;
   }, {});
+
+  const getCurrentDistribution = (ticker) => {
+    const distHistory = distributions[ticker]?.history;
+    if (!distHistory) return 0;
+
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+
+    // Try to get the most recent distribution
+    for (let year = currentYear; year >= currentYear - 1; year--) {
+      const yearData = distHistory[year];
+      if (yearData) {
+        for (let month = currentMonth; month >= 1; month--) {
+          const amount = yearData[month];
+          if (amount && amount !== "TBD") {
+            return parseFloat(amount);
+          }
+        }
+      }
+    }
+    return 0;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -33,20 +119,33 @@ const AddETFForm = ({ onClose }) => {
         throw new Error("Shares must be a valid number");
       }
 
-      await addDoc(etfsRef, {
+      const currentPrice = prices[formData.ticker]?.currentPrice;
+      if (!currentPrice) {
+        throw new Error("Could not get current price for selected ETF");
+      }
+
+      // Get current distribution
+      const distribution = getCurrentDistribution(formData.ticker);
+      console.log("Distribution for", formData.ticker, ":", distribution);
+
+      const newETF = {
         ...formData,
         totalShares,
         createdAt: new Date(),
         ticker: formData.ticker.toUpperCase(),
+        distribution, // Add the distribution amount
         purchases: [
           {
             date: formData.purchaseDate,
             shares: totalShares,
-            price: 0,
+            price: Number(currentPrice),
           },
         ],
-      });
+      };
 
+      console.log("Saving ETF document:", newETF);
+
+      await addDoc(etfsRef, newETF);
       onClose();
     } catch (error) {
       console.error("Error adding ETF:", error);
@@ -70,6 +169,11 @@ const AddETFForm = ({ onClose }) => {
       }));
     }
   };
+
+  // Add current price display when ETF is selected
+  const selectedPrice = formData.ticker
+    ? prices[formData.ticker]?.currentPrice
+    : null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
@@ -99,7 +203,7 @@ const AddETFForm = ({ onClose }) => {
               >
                 <option value="">Select an ETF</option>
                 {Object.entries(groupedETFs).map(([group, etfs]) => (
-                  <optgroup key={group} label={group.replace("_", " ")}>
+                  <optgroup key={group} label={GROUP_NAMES[group] || group}>
                     {etfs.map((etf) => (
                       <option key={etf.ticker} value={etf.ticker}>
                         {etf.ticker} ({etf.frequency})
@@ -110,6 +214,11 @@ const AddETFForm = ({ onClose }) => {
               </select>
               <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
+            {selectedPrice && (
+              <p className="mt-1 text-sm text-gray-500">
+                Current Price: ${selectedPrice.toFixed(2)}
+              </p>
+            )}
           </div>
 
           <div>

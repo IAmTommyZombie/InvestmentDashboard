@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Trash2, Plus, Calendar } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Trash2, Plus, Calendar, Edit, X } from "lucide-react";
 import { getDistribution } from "../../data/distributions";
 import { db } from "../../firebase/config";
 import {
@@ -24,6 +24,34 @@ import {
   TableRow,
   Paper,
 } from "@mui/material";
+import { formatCurrency } from "../../utils/formatters";
+
+// Define ETF groups
+const ETF_GROUPS = {
+  WEEKLY: ["YMAG", "YMAX", "LFGY", "GPTY"],
+  GROUP_A: [
+    "TSLY",
+    "GOOY",
+    "YBIT",
+    "OARK",
+    "XOMO",
+    "TSMY",
+    "CRSH",
+    "FIVY",
+    "FEAT",
+  ],
+  GROUP_B: ["NVDY", "FBY", "GDXY", "JPMO", "MRNY", "MARO", "PLTY"],
+  GROUP_C: ["CONY", "MSFO", "AMDY", "NFLY", "PYPY", "ULTY", "ABNY"],
+  GROUP_D: ["MSTY", "AMZY", "APLY", "DISO", "SQY", "SMCY", "AIYY"],
+};
+
+const GROUP_NAMES = {
+  WEEKLY: "Weekly Distributions",
+  GROUP_A: "Group A - Tech Leaders",
+  GROUP_B: "Group B - Growth Companies",
+  GROUP_C: "Group C - Consumer Brands",
+  GROUP_D: "Group D - Market Innovators",
+};
 
 const getGroupStyle = (group) => {
   switch (group) {
@@ -97,49 +125,103 @@ const getNextDistributionDate = (group) => {
 };
 
 const PortfolioView = () => {
-  const { portfolio } = usePortfolio();
-  const { monthlyDistribution } = useDistributionContext();
-  const [etfs, setEtfs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [selectedYear] = useState(new Date().getFullYear());
-  const [selectedMonth] = useState(new Date().getMonth());
-  const [sortConfig, setSortConfig] = useState({
-    key: "value",
-    direction: "desc",
-  });
-  const [showPurchaseHistory, setShowPurchaseHistory] = useState(false);
-  const [selectedEtf, setSelectedEtf] = useState(null);
-  const [newPurchase, setNewPurchase] = useState({
-    date: new Date().toISOString().split("T")[0],
-    shares: "",
-    price: "",
-  });
+  const { etfs, loading: etfsLoading } = usePortfolio();
   const [prices, setPrices] = useState({});
   const [distributions, setDistributions] = useState({});
-  const { getLatestDistribution, loading: distributionLoading } =
-    useDistributions();
+  const [pricesLoading, setPricesLoading] = useState(true);
+  const [sortConfig, setSortConfig] = useState({
+    key: "ticker",
+    direction: "asc",
+  });
+  const [selectedEtf, setSelectedEtf] = useState(null);
 
-  const requestSort = (key) => {
-    let direction = "asc";
-    if (sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc";
-    }
-    setSortConfig({ key, direction });
-  };
+  const MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
 
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return null;
-    return sortConfig.direction === "asc" ? (
-      <span className="ml-1">↑</span>
-    ) : (
-      <span className="ml-1">↓</span>
+  useEffect(() => {
+    console.log("Setting up price listener");
+    setPricesLoading(true);
+
+    const priceUnsubscribe = onSnapshot(
+      collection(db, "prices"),
+      (snapshot) => {
+        const priceData = {};
+        console.log(
+          "Raw snapshot data:",
+          snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() }))
+        );
+
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          console.log(`Processing doc ${doc.id}:`, data);
+          priceData[doc.id] = data;
+        });
+
+        console.log("Final price data:", priceData);
+        setPrices(priceData);
+        setPricesLoading(false);
+      }
     );
+
+    const distributionUnsubscribe = onSnapshot(
+      collection(db, "distributions"),
+      (snapshot) => {
+        const distData = {};
+        snapshot.forEach((doc) => {
+          distData[doc.id] = doc.data();
+        });
+        setDistributions(distData);
+      }
+    );
+
+    return () => {
+      priceUnsubscribe();
+      distributionUnsubscribe();
+    };
+  }, []);
+
+  const getEtfGroup = (ticker) => {
+    for (const [group, etfs] of Object.entries(ETF_GROUPS)) {
+      if (etfs.includes(ticker)) {
+        return group;
+      }
+    }
+    return "UNKNOWN";
   };
 
-  const sortData = (data) => {
-    const sortedData = [...data].sort((a, b) => {
+  const getGroupColor = (group) => {
+    switch (group) {
+      case "WEEKLY":
+        return "bg-purple-100 border-purple-200";
+      case "GROUP_A":
+        return "bg-blue-100 border-blue-200";
+      case "GROUP_B":
+        return "bg-green-100 border-green-200";
+      case "GROUP_C":
+        return "bg-yellow-100 border-yellow-200";
+      case "GROUP_D":
+        return "bg-red-100 border-red-200";
+      default:
+        return "bg-gray-100 border-gray-200";
+    }
+  };
+
+  const sortEtfs = (etfs) => {
+    if (!sortConfig.key) return etfs;
+
+    return [...etfs].sort((a, b) => {
       let aValue, bValue;
 
       switch (sortConfig.key) {
@@ -147,600 +229,563 @@ const PortfolioView = () => {
           aValue = a.ticker;
           bValue = b.ticker;
           break;
-        case "group":
-          aValue = a.group;
-          bValue = b.group;
-          break;
         case "shares":
-          aValue = Number(a.totalShares);
-          bValue = Number(b.totalShares);
+          aValue = a.totalShares || 0;
+          bValue = b.totalShares || 0;
+          break;
+        case "price":
+          aValue = prices[a.ticker]?.currentPrice || 0;
+          bValue = prices[b.ticker]?.currentPrice || 0;
           break;
         case "value":
-          aValue = a.totalShares * (a.currentPrice || 0);
-          bValue = b.totalShares * (b.currentPrice || 0);
+          aValue = (prices[a.ticker]?.currentPrice || 0) * (a.totalShares || 0);
+          bValue = (prices[b.ticker]?.currentPrice || 0) * (b.totalShares || 0);
           break;
-        case "monthlyIncome":
-          const aIncome = calculateMonthlyIncome(
-            a,
-            selectedYear,
-            selectedMonth + 1
-          );
-          const bIncome = calculateMonthlyIncome(
-            b,
-            selectedYear,
-            selectedMonth + 1
-          );
-          aValue = aIncome === "TBD" ? -1 : aIncome;
-          bValue = bIncome === "TBD" ? -1 : bIncome;
-          break;
-        case "breakEven":
-          const aBreakEven = calculateBreakEven(a);
-          const bBreakEven = calculateBreakEven(b);
-          aValue = aBreakEven === "TBD" ? Infinity : aBreakEven.months;
-          bValue = bBreakEven === "TBD" ? Infinity : bBreakEven.months;
+        case "income":
+          aValue = (a.distribution || 0) * (a.totalShares || 0);
+          bValue = (b.distribution || 0) * (b.totalShares || 0);
           break;
         default:
           return 0;
       }
 
-      if (aValue < bValue) {
-        return sortConfig.direction === "asc" ? -1 : 1;
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === "asc" ? 1 : -1;
-      }
-      return 0;
+      const direction = sortConfig.direction === "asc" ? 1 : -1;
+      return aValue > bValue ? direction : -direction;
     });
-
-    return sortedData;
   };
 
-  useEffect(() => {
-    // Subscribe to prices
-    const pricesUnsubscribe = onSnapshot(
-      collection(db, "prices"),
-      (snapshot) => {
-        const priceData = {};
-        snapshot.forEach((doc) => {
-          priceData[doc.id] = doc.data().currentPrice;
-        });
-        setPrices(priceData);
-      },
-      (error) => {
-        console.error("Error fetching prices:", error);
-      }
+  const handleSort = (key) => {
+    setSortConfig((prevConfig) => ({
+      key,
+      direction:
+        prevConfig.key === key && prevConfig.direction === "asc"
+          ? "desc"
+          : "asc",
+    }));
+  };
+
+  const groupEtfsByMonth = () => {
+    if (!etfs || !Array.isArray(etfs)) return {};
+
+    const portfolioEtfs = etfs.filter(
+      (etf) => etf.totalShares && etf.totalShares > 0 && etf.ticker
     );
 
-    // Subscribe to distributions
-    const distributionsUnsubscribe = onSnapshot(
-      collection(db, "distributions"),
-      (snapshot) => {
-        const distributionData = {};
-        snapshot.forEach((doc) => {
-          distributionData[doc.id] = doc.data().distributions;
-        });
-        setDistributions(distributionData);
-      },
-      (error) => {
-        console.error("Error fetching distributions:", error);
+    const groups = portfolioEtfs.reduce((acc, etf) => {
+      const month = etf.purchaseDate
+        ? parseInt(etf.purchaseDate.split("-")[1]) - 1
+        : 0;
+
+      if (!acc[month]) {
+        acc[month] = [];
       }
-    );
 
-    // Cleanup subscriptions
-    return () => {
-      pricesUnsubscribe();
-      distributionsUnsubscribe();
-    };
-  }, []);
+      // Check if this ETF already exists in this month
+      const existingEtfIndex = acc[month].findIndex(
+        (e) => e.ticker === etf.ticker
+      );
 
-  // Fetch ETFs from Firebase
-  useEffect(() => {
-    try {
-      const etfsRef = collection(db, "etfs");
-      const q = query(etfsRef);
+      if (existingEtfIndex >= 0) {
+        // Combine with existing entry
+        const existingEtf = acc[month][existingEtfIndex];
+        acc[month][existingEtfIndex] = {
+          ...existingEtf,
+          totalShares: (existingEtf.totalShares || 0) + (etf.totalShares || 0),
+          // Combine purchases arrays if they exist
+          purchases: [
+            ...(existingEtf.purchases || []),
+            ...(etf.purchases || []),
+          ],
+          // Keep the earliest purchase date
+          purchaseDate:
+            existingEtf.purchaseDate < etf.purchaseDate
+              ? existingEtf.purchaseDate
+              : etf.purchaseDate,
+        };
+      } else {
+        // Add new entry
+        acc[month].push(etf);
+      }
 
-      const unsubscribe = onSnapshot(q, async (snapshot) => {
-        const etfsData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+      return acc;
+    }, {});
 
-        // Calculate monthly income for each ETF
-        const etfsWithIncome = await Promise.all(
-          etfsData.map(async (etf) => {
-            const distribution = await getDistribution(
-              etf.ticker,
-              selectedYear,
-              selectedMonth + 1
-            );
-            return {
-              ...etf,
-              monthlyIncome: distribution * etf.totalShares,
-              group: etf.group || "GROUP_A", // Default group if none specified
-            };
-          })
-        );
+    console.log("Grouped ETFs:", groups);
+    return groups;
+  };
 
-        setEtfs(etfsWithIncome);
-        setLoading(false);
+  const monthlyGroups = useMemo(() => groupEtfsByMonth(), [etfs]);
+
+  // Function to get current distribution for an ETF
+  const getCurrentDistribution = (ticker) => {
+    const distHistory = distributions[ticker]?.history;
+    if (!distHistory) return 0;
+
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+
+    // Try to get the most recent distribution
+    for (let year = currentYear; year >= currentYear - 1; year--) {
+      const yearData = distHistory[year];
+      if (yearData) {
+        for (let month = currentMonth; month >= 1; month--) {
+          const amount = yearData[month];
+          if (amount && amount !== "TBD") {
+            return parseFloat(amount);
+          }
+        }
+      }
+    }
+    return 0;
+  };
+
+  // Calculate totals using current distributions
+  const calculateTotals = () => {
+    let totalValue = 0;
+    let totalMonthlyIncome = 0;
+    const months = Object.keys(monthlyGroups).sort(); // Sort months chronologically
+
+    months.forEach((currentMonth) => {
+      let monthValue = 0;
+      let monthIncome = 0;
+
+      // Calculate for all months up to and including current month
+      months.forEach((month) => {
+        if (month <= currentMonth) {
+          monthlyGroups[month].forEach((etf) => {
+            const price = prices[etf.ticker]?.currentPrice || 0;
+            const shares = etf.totalShares || 0;
+            const value = price * shares;
+            const distribution = getCurrentDistribution(etf.ticker);
+            const monthlyIncome = distribution * shares;
+
+            monthValue += value;
+            monthIncome += monthlyIncome;
+
+            console.log(`Calculating for ${month} ETF:`, {
+              ticker: etf.ticker,
+              price,
+              shares,
+              value,
+              distribution,
+              monthlyIncome,
+            });
+          });
+        }
       });
 
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Error fetching ETFs:", error);
-      setError("Failed to fetch ETFs");
-      setLoading(false);
-    }
-  }, [selectedYear, selectedMonth]);
+      // Store the progressive totals for each month
+      monthlyGroups[currentMonth].totalValue = monthValue;
+      monthlyGroups[currentMonth].totalMonthlyIncome = monthIncome;
+      monthlyGroups[currentMonth].annualYield = monthValue
+        ? ((monthIncome * 12) / monthValue) * 100
+        : 0;
 
-  // Group ETFs by month
-  const groupEtfsByMonth = () => {
-    const months = Array(12)
-      .fill()
-      .map((_, i) => i);
-
-    return months
-      .map((month) => {
-        const monthName = new Date(selectedYear, month).toLocaleString(
-          "default",
-          { month: "long" }
-        );
-
-        return {
-          month: monthName,
-          etfs: etfs.map((etf) => ({
-            ...etf,
-            monthlyIncome: calculateMonthlyIncome(etf, selectedYear, month + 1),
-          })),
-        };
-      })
-      .filter((group) => group.etfs.length > 0);
-  };
-
-  // Calculate monthly income for an ETF
-  const calculateMonthlyIncome = async (etf, year, month) => {
-    const distribution = await getDistribution(etf.ticker, year, month);
-    if (distribution === "TBD") return "TBD";
-
-    const multiplier = ["WEEKLY"].includes(etf.group) ? 52 / 12 : 1;
-    return distribution * etf.totalShares * multiplier;
-  };
-
-  // Calculate total value
-  const calculateTotalValue = (shares, price) => {
-    return shares * price;
-  };
-
-  const calculateBreakEven = (etf) => {
-    console.log("Calculating break-even for", etf.ticker);
-
-    const currentPrice = etf.currentPrice || 0;
-    const totalValue = etf.totalShares * currentPrice;
-
-    const today = new Date();
-    const currentMonth = today.getMonth() + 1;
-    const currentYear = today.getFullYear();
-
-    // Get frequency multiplier based on group
-    const multiplier = etf.group === "WEEKLY" ? 52 / 12 : 13 / 12;
-
-    // Get latest valid distribution
-    let latestDistribution = null;
-    for (let year = currentYear; year >= 2024; year--) {
-      for (
-        let month = year === currentYear ? currentMonth : 12;
-        month >= 1;
-        month--
-      ) {
-        const dist = getDistribution(etf.ticker, year, month);
-        if (dist && dist !== "TBD" && typeof dist === "number") {
-          latestDistribution = dist;
-          break;
-        }
-      }
-      if (latestDistribution) break;
-    }
-
-    if (!latestDistribution) return "TBD";
-
-    // Calculate total distributions received
-    let totalDistributionsReceived = 0;
-    if (etf.purchaseDate) {
-      const purchaseDate = new Date(etf.purchaseDate);
-      let purchaseYear = purchaseDate.getFullYear();
-      let purchaseMonth = purchaseDate.getMonth() + 1;
-
-      // Calculate months between purchase date and today
-      const monthDiff =
-        (currentYear - purchaseYear) * 12 + (currentMonth - purchaseMonth);
-
-      // For each month since purchase
-      for (let i = 0; i <= monthDiff; i++) {
-        const calcMonth = ((purchaseMonth - 1 + i) % 12) + 1;
-        const calcYear =
-          purchaseYear + Math.floor((purchaseMonth - 1 + i) / 12);
-
-        const dist = getDistribution(etf.ticker, calcYear, calcMonth);
-        if (dist && dist !== "TBD" && typeof dist === "number") {
-          totalDistributionsReceived += dist * etf.totalShares * multiplier;
-        }
-      }
-    }
-
-    // Calculate monthly income using latest distribution
-    const monthlyIncome = latestDistribution * etf.totalShares * multiplier;
-    if (monthlyIncome === 0) return "TBD";
-
-    const remainingValue = totalValue - totalDistributionsReceived;
-    const monthsToBreakEven = remainingValue / monthlyIncome;
-
-    return {
-      totalInvestment: totalValue,
-      totalDistributions: totalDistributionsReceived,
-      months: monthsToBreakEven,
-      years: monthsToBreakEven / 12,
-    };
-  };
-
-  const calculateStats = () => {
-    const totalValue = etfs.reduce((sum, etf) => {
-      return sum + etf.totalShares * (etf.currentPrice || 0);
-    }, 0);
-
-    const monthlyIncome = etfs.reduce((sum, etf) => {
-      const income = calculateMonthlyIncome(
-        etf,
-        selectedYear,
-        selectedMonth + 1
-      );
-      return sum + (typeof income === "number" ? income : 0);
-    }, 0);
-
-    const yearlyIncome = monthlyIncome * 12;
-    const averageYield = totalValue > 0 ? (yearlyIncome / totalValue) * 100 : 0;
-
-    const totalShares = etfs.reduce(
-      (sum, etf) => sum + Number(etf.totalShares),
-      0
-    );
-    const totalDistributionsReceived = etfs.reduce((sum, etf) => {
-      const breakEven = calculateBreakEven(etf);
-      return sum + (breakEven !== "TBD" ? breakEven.totalDistributions : 0);
-    }, 0);
+      // Update running totals
+      totalValue = monthValue;
+      totalMonthlyIncome = monthIncome;
+    });
 
     return {
       totalValue,
-      monthlyIncome,
-      yearlyIncome,
-      averageYield,
-      totalShares,
-      totalDistributionsReceived,
+      totalMonthlyIncome,
+      annualYield: totalValue
+        ? ((totalMonthlyIncome * 12) / totalValue) * 100
+        : 0,
     };
   };
 
-  const handleAddPurchase = async (etfId) => {
-    if (!newPurchase.shares || !newPurchase.price) {
-      alert("Please fill in all fields");
+  const totals = calculateTotals();
+
+  // Show loading state if either ETFs or prices are still loading
+  if (etfsLoading || pricesLoading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center min-h-[200px]">
+          <div className="text-gray-500">Loading portfolio data...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!etfs || etfs.length === 0) {
+    return <div>No ETFs found in portfolio</div>;
+  }
+
+  // Purchase History Modal
+  const PurchaseHistoryModal = ({ etf, onClose }) => {
+    if (!etf) return null;
+
+    const currentPrice = prices[etf.ticker]?.currentPrice || 0;
+
+    // Calculate total amount paid
+    const totalPaid = etf.purchases?.reduce((sum, purchase) => {
+      const price = parseFloat(purchase.price) || 0;
+      const shares = parseInt(purchase.shares) || 0;
+      return sum + price * shares;
+    }, 0);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg p-6 max-w-2xl w-full">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-bold">
+              {etf.ticker} Purchase History
+              <span className="ml-2 text-sm text-gray-500">
+                (Current Price: {formatCurrency(currentPrice)})
+              </span>
+            </h3>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <span className="text-2xl">&times;</span>
+            </button>
+          </div>
+
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Date
+                </th>
+                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Shares
+                </th>
+                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Price Paid
+                </th>
+                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total Paid
+                </th>
+                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Current Value
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {etf.purchases?.map((purchase, index) => {
+                const purchaseShares = parseInt(purchase.shares) || 0;
+                const purchasePrice = parseFloat(purchase.price) || 0;
+                const purchaseTotal = purchaseShares * purchasePrice;
+                const currentValue = purchaseShares * currentPrice;
+
+                return (
+                  <tr key={index}>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {purchase.date}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {purchaseShares.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {purchasePrice > 0
+                        ? formatCurrency(purchasePrice)
+                        : "Not recorded"}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {purchasePrice > 0
+                        ? formatCurrency(purchaseTotal)
+                        : "Not recorded"}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div>{formatCurrency(currentValue)}</div>
+                      <div className="text-sm text-gray-500">
+                        at current price
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-gray-50 font-semibold">
+                <td className="px-4 py-2">Totals</td>
+                <td className="px-4 py-2 text-right">
+                  {etf.totalShares?.toLocaleString()}
+                </td>
+                <td className="px-4 py-2 text-right">-</td>
+                <td className="px-4 py-2 text-right">
+                  {formatCurrency(totalPaid)}
+                </td>
+                <td className="px-4 py-2 text-right">
+                  {formatCurrency(etf.totalShares * currentPrice)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div className="mt-4 text-sm text-gray-500">
+            Note: Historical purchase prices are not recorded for some entries.
+            Only current market values are shown.
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleDeleteETF = async (etfId) => {
+    if (!window.confirm("Are you sure you want to delete this ETF?")) {
       return;
     }
 
     try {
-      const etfRef = doc(db, "etfs", etfId);
-      await updateDoc(etfRef, {
-        purchases: arrayUnion({
-          date: newPurchase.date,
-          shares: Number(newPurchase.shares),
-          price: Number(newPurchase.price),
-        }),
-        totalShares: selectedEtf.totalShares + Number(newPurchase.shares),
-      });
-
-      setNewPurchase({
-        date: new Date().toISOString().split("T")[0],
-        shares: "",
-        price: "",
-      });
-      setShowPurchaseHistory(false);
-      setSelectedEtf(null);
+      await deleteDoc(doc(db, "etfs", etfId));
+      if (selectedEtf?.id === etfId) {
+        setSelectedEtf(null);
+      }
     } catch (error) {
-      console.error("Error adding purchase:", error);
-      alert("Failed to add purchase");
+      console.error("Error deleting ETF:", error);
+      alert("Error deleting ETF");
     }
   };
 
-  // Purchase History Dialog
-  const PurchaseHistoryDialog = () => {
-    if (!showPurchaseHistory || !selectedEtf) return null;
+  const renderTableRow = (etf) => {
+    const currentPrice = prices[etf.ticker]?.currentPrice || 0;
+    const currentValue = currentPrice * etf.totalShares;
+    const distribution = getCurrentDistribution(etf.ticker);
+    const monthlyIncome = distribution * etf.totalShares;
+
+    const monthsToBreakEven =
+      monthlyIncome > 0 ? Math.ceil(currentValue / monthlyIncome) : Infinity;
+
+    const yearsToBreakEven = Math.floor(monthsToBreakEven / 12);
+    const remainingMonths = monthsToBreakEven % 12;
+    const breakEvenDisplay =
+      monthlyIncome > 0 ? `${yearsToBreakEven}y ${remainingMonths}m` : "N/A";
+
+    // Get group and corresponding background color
+    const getGroupColor = (ticker) => {
+      if (ETF_GROUPS.WEEKLY.includes(ticker))
+        return "bg-gray-100 hover:bg-gray-200";
+      if (ETF_GROUPS.GROUP_A.includes(ticker))
+        return "bg-green-50 hover:bg-green-100";
+      if (ETF_GROUPS.GROUP_B.includes(ticker))
+        return "bg-yellow-50 hover:bg-yellow-100";
+      if (ETF_GROUPS.GROUP_C.includes(ticker))
+        return "bg-blue-50 hover:bg-blue-100";
+      if (ETF_GROUPS.GROUP_D.includes(ticker))
+        return "bg-red-50 hover:bg-red-100";
+      return "";
+    };
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg max-w-2xl w-full p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-medium">
-              {selectedEtf.ticker} Purchase History
-            </h3>
-            <button
-              onClick={() => {
-                setShowPurchaseHistory(false);
-                setSelectedEtf(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              ×
-            </button>
-          </div>
-
-          {/* Purchase History Table */}
-          <div className="mb-6">
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell align="right">Shares</TableCell>
-                    <TableCell align="right">Price</TableCell>
-                    <TableCell align="right">Total</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selectedEtf.purchases?.map((purchase, index) => (
-                    <TableRow key={index}>
-                      <TableCell component="th" scope="row">
-                        {purchase.date}
-                      </TableCell>
-                      <TableCell align="right">{purchase.shares}</TableCell>
-                      <TableCell align="right">
-                        ${purchase.price.toFixed(2)}
-                      </TableCell>
-                      <TableCell align="right">
-                        ${(purchase.shares * purchase.price).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </div>
-
-          {/* Add New Purchase Form */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="text-sm font-medium mb-4">Add New Purchase</h4>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={newPurchase.date}
-                  onChange={(e) =>
-                    setNewPurchase((prev) => ({
-                      ...prev,
-                      date: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Shares
-                </label>
-                <input
-                  type="number"
-                  value={newPurchase.shares}
-                  onChange={(e) =>
-                    setNewPurchase((prev) => ({
-                      ...prev,
-                      shares: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Price
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={newPurchase.price}
-                  onChange={(e) =>
-                    setNewPurchase((prev) => ({
-                      ...prev,
-                      price: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => handleAddPurchase(selectedEtf.id)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Add Purchase
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <tr key={etf.ticker} className={`${getGroupColor(etf.ticker)}`}>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {etf.ticker}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {etf.totalShares.toLocaleString()}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {formatCurrency(currentPrice)}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {formatCurrency(currentValue)}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {formatCurrency(distribution)}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {formatCurrency(monthlyIncome)}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+          {breakEvenDisplay}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 space-x-2">
+          <button
+            onClick={() => setSelectedEtf({ ...etf, id: etf.id })}
+            className="text-blue-600 hover:text-blue-800 mr-2"
+          >
+            <Edit className="w-4 h-4 inline" />
+          </button>
+          <button
+            onClick={() => handleDeleteETF(etf.id)}
+            className="text-red-600 hover:text-red-800"
+          >
+            <Trash2 className="w-4 h-4 inline" />
+          </button>
+        </td>
+      </tr>
     );
   };
 
-  if (distributionLoading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>;
-
-  const monthlyGroups = groupEtfsByMonth();
-  const totalValue = calculateTotalValue(
-    etfs.reduce((sum, etf) => sum + etf.totalShares, 0),
-    etfs.reduce((sum, etf) => sum + etf.currentPrice, 0)
+  // Update the table header to include Actions column
+  const renderTableHeader = () => (
+    <thead className="bg-gray-50">
+      <tr>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Ticker
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Shares
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Current Price
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Value
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Distribution
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Monthly Income
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Break Even
+        </th>
+        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Actions
+        </th>
+      </tr>
+    </thead>
   );
-  const stats = calculateStats();
-
-  const sortedEtfs = sortData(etfs);
 
   return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Total Value
-          </h3>
-          <p className="text-2xl font-semibold">
-            $
-            {totalValue.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-600 mb-2">
+            Total Portfolio Value
+          </h2>
+          <p className="text-3xl font-bold text-blue-600">
+            {formatCurrency(totals.totalValue)}
           </p>
+          <p className="text-sm text-gray-500 mt-1">Based on current prices</p>
         </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
+        <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-600 mb-2">
             Monthly Income
-          </h3>
-          <p className="text-2xl font-semibold text-green-600">
-            $
-            {stats.monthlyIncome.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+          </h2>
+          <p className="text-3xl font-bold text-green-600">
+            {formatCurrency(totals.totalMonthlyIncome)}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            Total monthly distributions
           </p>
         </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Yearly Income
-          </h3>
-          <p className="text-2xl font-semibold text-green-600">
-            $
-            {stats.yearlyIncome.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+        <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-600 mb-2">
+            Annual Yield
+          </h2>
+          <p className="text-3xl font-bold text-purple-600">
+            {totals.annualYield.toFixed(2)}%
           </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Average Yield
-          </h3>
-          <p className="text-2xl font-semibold">
-            {stats.averageYield.toFixed(2)}%
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Total Shares
-          </h3>
-          <p className="text-2xl font-semibold">
-            {stats.totalShares.toLocaleString()}
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Total Distributions Received
-          </h3>
-          <p className="text-2xl font-semibold text-green-600">
-            $
-            {stats.totalDistributionsReceived.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
-          </p>
+          <p className="text-sm text-gray-500 mt-1">Based on current value</p>
         </div>
       </div>
 
-      {/* Holdings Table with Sortable Headers */}
-      <div className="bg-white rounded-lg shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium">Holdings</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Symbol</TableCell>
-                  <TableCell align="right">Shares</TableCell>
-                  <TableCell align="right">Price</TableCell>
-                  <TableCell align="right">Total Value</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {portfolio.map((holding) => (
-                  <TableRow key={holding.symbol}>
-                    <TableCell component="th" scope="row">
-                      {holding.symbol}
-                    </TableCell>
-                    <TableCell align="right">{holding.shares}</TableCell>
-                    <TableCell align="right">
-                      ${holding.price?.toFixed(2) || "N/A"}
-                    </TableCell>
-                    <TableCell align="right">
-                      $
-                      {calculateTotalValue(
-                        holding.shares,
-                        holding.price
-                      )?.toFixed(2) || "N/A"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </div>
-      </div>
+      {/* Monthly Tables */}
+      {Object.entries(monthlyGroups)
+        .sort()
+        .map(([month, monthEtfs]) => {
+          // Get all ETFs from current and previous months
+          const cumulativeEtfs = Object.entries(monthlyGroups)
+            .filter(([m]) => m <= month)
+            .reduce((acc, [_, etfs]) => {
+              etfs.forEach((etf) => {
+                const existingEtf = acc.find((e) => e.ticker === etf.ticker);
+                if (existingEtf) {
+                  // Update existing ETF
+                  existingEtf.totalShares =
+                    (existingEtf.totalShares || 0) + (etf.totalShares || 0);
+                  existingEtf.purchases = [
+                    ...(existingEtf.purchases || []),
+                    ...(etf.purchases || []),
+                  ];
+                } else {
+                  // Add new ETF
+                  acc.push({ ...etf });
+                }
+              });
+              return acc;
+            }, []);
 
-      {/* Monthly Breakdown with Sorting */}
-      {monthlyGroups.map(({ month, etfs: monthlyEtfs }) => (
-        <div key={month} className="bg-white rounded-lg shadow-sm">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium">{month}</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Symbol</TableCell>
-                    <TableCell align="right">Shares</TableCell>
-                    <TableCell align="right">Price</TableCell>
-                    <TableCell align="right">Total Value</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {monthlyEtfs.map((etf) => (
-                    <TableRow key={etf.ticker}>
-                      <TableCell component="th" scope="row">
-                        {etf.ticker}
-                      </TableCell>
-                      <TableCell align="right">{etf.totalShares}</TableCell>
-                      <TableCell align="right">
-                        ${etf.currentPrice?.toFixed(2) || "N/A"}
-                      </TableCell>
-                      <TableCell align="right">
-                        $
-                        {(etf.totalShares * etf.currentPrice).toFixed(2) ||
-                          "N/A"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </div>
-        </div>
-      ))}
+          // Calculate cumulative totals
+          const cumulativeTotals = cumulativeEtfs.reduce(
+            (acc, etf) => {
+              const currentPrice = prices[etf.ticker]?.currentPrice || 0;
+              const shares = etf.totalShares || 0;
+              const value = currentPrice * shares;
+              const distribution = getCurrentDistribution(etf.ticker);
+              const monthlyIncome = distribution * shares;
 
-      {/* Purchase History Dialog */}
-      <PurchaseHistoryDialog />
+              acc.value += value;
+              acc.monthlyIncome += monthlyIncome;
+              return acc;
+            },
+            { value: 0, monthlyIncome: 0 }
+          );
+
+          // Calculate this month's individual totals
+          const monthTotals = monthEtfs.reduce(
+            (acc, etf) => {
+              const currentPrice = prices[etf.ticker]?.currentPrice || 0;
+              const shares = etf.totalShares || 0;
+              const value = currentPrice * shares;
+              const distribution = getCurrentDistribution(etf.ticker);
+              const monthlyIncome = distribution * shares;
+
+              acc.value += value;
+              acc.monthlyIncome += monthlyIncome;
+              return acc;
+            },
+            { value: 0, monthlyIncome: 0 }
+          );
+
+          return (
+            <div key={month} className="mb-8">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">
+                {MONTHS[parseInt(month)]}
+              </h3>
+              <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
+                <div className="bg-white shadow rounded-lg overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    {renderTableHeader()}
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {sortEtfs(cumulativeEtfs).map(renderTableRow)}
+                      <tr className="bg-gray-50 font-semibold">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {MONTHS[parseInt(month)]} Totals
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          -
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          -
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(cumulativeTotals.value)}
+                          <div className="text-xs text-gray-500">
+                            (This month: {formatCurrency(monthTotals.value)})
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          -
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(cumulativeTotals.monthlyIncome)}
+                          <div className="text-xs text-gray-500">
+                            (This month:{" "}
+                            {formatCurrency(monthTotals.monthlyIncome)})
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+      {/* Purchase History Modal */}
+      {selectedEtf && (
+        <PurchaseHistoryModal
+          etf={selectedEtf}
+          onClose={() => setSelectedEtf(null)}
+        />
+      )}
     </div>
   );
 };

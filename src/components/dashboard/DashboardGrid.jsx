@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { db } from "../../firebase/config";
 import {
   collection,
@@ -7,6 +7,7 @@ import {
   setDoc,
   Timestamp,
   getDoc,
+  getDocs,
 } from "firebase/firestore";
 import { usePortfolio } from "../../context/PortfolioContext";
 import { useDistribution } from "../../context/DistributionContext";
@@ -18,7 +19,18 @@ import {
   getETFStatus,
 } from "../../data/etfMetadata";
 import { formatCurrency } from "../../utils/formatters";
-import { Card, Typography } from "@mui/material";
+import {
+  Card,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Grid,
+} from "@mui/material";
 
 const FALLBACK_PRICES = {
   YMAG: { price: 18.0, quantity: 100 },
@@ -57,13 +69,57 @@ const FALLBACK_PRICES = {
   AIYY: { price: 7.62, quantity: 100 },
 };
 
-const DashboardGrid = () => {
-  const { etfs = [], totalValue = 0, totalShares = 0 } = usePortfolio() || {};
+const ETF_GROUPS = {
+  WEEKLY: ["YMAG", "YMAX", "LFGY", "GPTY"],
+  GROUP_A: [
+    "TSLY",
+    "GOOY",
+    "YBIT",
+    "OARK",
+    "XOMO",
+    "TSMY",
+    "CRSH",
+    "FIVY",
+    "FEAT",
+  ],
+  GROUP_B: ["NVDY", "FBY", "GDXY", "JPMO", "MRNY", "MARO", "PLTY"],
+  GROUP_C: ["CONY", "MSFO", "AMDY", "NFLY", "PYPY", "ULTY", "ABNY"],
+  GROUP_D: ["MSTY", "AMZY", "APLY", "DISO", "SQY", "SMCY", "AIYY"],
+};
+
+const GROUP_NAMES = {
+  WEEKLY: "Weekly Distributions",
+  GROUP_A: "Group A - 13x/Year",
+  GROUP_B: "Group B - 13x/Year",
+  GROUP_C: "Group C - Monthly",
+  GROUP_D: "Group D - Monthly",
+};
+
+const getGroupColor = (ticker) => {
+  if (ETF_GROUPS.WEEKLY.includes(ticker)) return "bg-gray-50 hover:bg-gray-100";
+  if (ETF_GROUPS.GROUP_A.includes(ticker))
+    return "bg-green-50 hover:bg-green-100";
+  if (ETF_GROUPS.GROUP_B.includes(ticker))
+    return "bg-yellow-50 hover:bg-yellow-100";
+  if (ETF_GROUPS.GROUP_C.includes(ticker))
+    return "bg-blue-50 hover:bg-blue-100";
+  if (ETF_GROUPS.GROUP_D.includes(ticker)) return "bg-red-50 hover:bg-red-100";
+  return "bg-white hover:bg-gray-50";
+};
+
+export default function DashboardGrid() {
+  const {
+    etfs = [],
+    totalValue = 0,
+    totalShares = 0,
+    portfolioEtfs = [],
+  } = usePortfolio() || {};
   const {
     getLatestDistribution,
     getPaymentsPerYear,
     distributions = {},
     loading,
+    monthlyDistribution,
   } = useDistribution() || {};
   const [prices, setPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(true);
@@ -75,28 +131,29 @@ const DashboardGrid = () => {
 
   useEffect(() => {
     console.log("Setting up price listener");
-    const unsubscribe = onSnapshot(
-      collection(db, "prices"),
-      (snapshot) => {
-        console.log("Received price update from Firestore");
-        const newPrices = {};
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          console.log(`Price for ${data.ticker}:`, data.currentPrice);
-          newPrices[data.ticker] = data.currentPrice;
-        });
-        console.log("Setting new prices:", newPrices);
-        setPrices(newPrices);
-        setPricesLoading(false);
-      },
-      (error) => {
-        console.error("Error fetching prices:", error);
-        setPricesLoading(false);
-      }
-    );
+    const pricesRef = collection(db, "etfs");
+
+    const unsubscribe = onSnapshot(pricesRef, (snapshot) => {
+      console.log("Fetching prices from Firebase...");
+      const pricesData = {};
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (!data.purchases && data.price && data.lastUpdated) {
+          pricesData[doc.id] = {
+            price: data.price,
+            lastUpdated: data.lastUpdated,
+          };
+        }
+      });
+
+      console.log("Setting prices state:", pricesData);
+      setPrices(pricesData);
+      setPricesLoading(false);
+    });
 
     return () => unsubscribe();
-  }, []);
+  }, []); // Only run once on mount
 
   const updateSingleETF = async (ticker) => {
     if (!ticker) return;
@@ -158,7 +215,10 @@ const DashboardGrid = () => {
       setPrices((prev) => {
         const newPrices = {
           ...prev,
-          [ticker]: currentPrice,
+          [ticker]: {
+            price: currentPrice,
+            lastUpdated: new Date().toLocaleString(),
+          },
         };
         console.log("New prices state:", newPrices);
         return newPrices;
@@ -180,7 +240,7 @@ const DashboardGrid = () => {
   const calculateAnnualYield = (etf) => {
     if (!etf?.ticker || !prices) return "N/A";
 
-    const price = prices[etf.ticker];
+    const price = prices[etf.ticker]?.price;
     const distribution = getLatestDistribution(etf.ticker);
 
     if (
@@ -248,7 +308,7 @@ const DashboardGrid = () => {
     acc[group].push({
       ticker,
       ...data,
-      currentPrice: prices[ticker] || "TBD",
+      currentPrice: prices[ticker]?.price || "TBD",
       distribution: getLatestDistribution(ticker) || "TBD",
       ...distributions[ticker],
     });
@@ -264,36 +324,48 @@ const DashboardGrid = () => {
 
   const renderETFRow = (etf) => {
     const status = getETFStatus(
-      prices[etf.ticker],
+      prices[etf.ticker]?.price,
       getLatestDistribution(etf.ticker)
     );
     const statusStyles = STATUS_STYLES[status];
 
-    const portfolioEntry = etfs.find(
+    const portfolioEntry = portfolioEtfs.find(
       (p) => p.ticker === etf.ticker && p.totalShares > 0
     );
 
     const isHeld = !!portfolioEntry;
-    const heldStyles = isHeld
-      ? "bg-blue-100 border-l-4 border-blue-500"
-      : "hover:bg-gray-50";
 
-    const currentPrice = prices[etf.ticker];
+    // Get the group color
+    const getGroupBackgroundColor = (ticker) => {
+      if (ETF_GROUPS.WEEKLY.includes(ticker)) return "bg-gray-50";
+      if (ETF_GROUPS.GROUP_A.includes(ticker)) return "bg-green-50";
+      if (ETF_GROUPS.GROUP_B.includes(ticker)) return "bg-yellow-50";
+      if (ETF_GROUPS.GROUP_C.includes(ticker)) return "bg-blue-50";
+      if (ETF_GROUPS.GROUP_D.includes(ticker)) return "bg-red-50";
+      return "";
+    };
+
+    const groupColor = getGroupBackgroundColor(etf.ticker);
+    const rowClassName = `${groupColor} ${
+      isHeld ? "border-l-4 border-blue-500" : ""
+    } transition-colors`;
+
+    const currentPrice = prices[etf.ticker]?.price;
     console.log(`Rendering ${etf.ticker} with price:`, currentPrice);
 
     return (
-      <tr key={etf.ticker} className={`${heldStyles} transition-colors`}>
-        <td className="px-4 py-3">
+      <TableRow key={etf.ticker} className={rowClassName}>
+        <TableCell className="px-4 py-3">
           <div className="flex items-center">
             <span className="font-medium text-gray-900">{etf.ticker}</span>
           </div>
-        </td>
-        <td className="px-4 py-3">
+        </TableCell>
+        <TableCell className="px-4 py-3">
           <span className="text-gray-900">
             {ETF_DATA[etf.ticker]?.name || ""}
           </span>
-        </td>
-        <td className="px-4 py-3 text-right">
+        </TableCell>
+        <TableCell className="px-4 py-3 text-right">
           <div className="flex flex-col items-end">
             <span className="font-medium text-gray-900">
               {currentPrice ? formatCurrency(currentPrice) : "Loading..."}
@@ -304,29 +376,29 @@ const DashboardGrid = () => {
               </span>
             )}
           </div>
-        </td>
-        <td className="px-4 py-3 text-right">
+        </TableCell>
+        <TableCell className="px-4 py-3 text-right">
           {isHeld && (
             <span className="font-medium text-gray-900">
               {portfolioEntry.totalShares.toLocaleString()}
             </span>
           )}
-        </td>
-        <td className="px-4 py-3 text-right">
+        </TableCell>
+        <TableCell className="px-4 py-3 text-right">
           {isHeld && (
             <span className="font-medium text-gray-900">
               {formatCurrency(currentPrice * portfolioEntry.totalShares)}
             </span>
           )}
-        </td>
-        <td className="px-4 py-3 text-right">
+        </TableCell>
+        <TableCell className="px-4 py-3 text-right">
           <div
             className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusStyles}`}
           >
             {status}
           </div>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
     );
   };
 
@@ -377,20 +449,46 @@ const DashboardGrid = () => {
     if (!etfs || !Array.isArray(etfs)) return 0;
 
     return etfs.reduce((total, etf) => {
-      const currentPrice = prices[etf.ticker] || 0;
+      const currentPrice = prices[etf.ticker]?.price || 0;
       return total + currentPrice * (etf.totalShares || 0);
     }, 0);
   };
 
   const formatPrice = (price) => {
-    return price ? `$${price.toFixed(2)}` : "Loading...";
+    return price ? `$${Number(price).toFixed(2)}` : "-";
   };
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "N/A";
-    // Convert Firebase timestamp to JavaScript Date
-    const date = new Date(timestamp._seconds * 1000);
-    return date.toLocaleString();
+  const formatDate = (timestampData) => {
+    console.log("formatDate received:", timestampData);
+    if (!timestampData || !timestampData.seconds) {
+      console.log("Invalid timestamp data");
+      return "-";
+    }
+
+    try {
+      // Convert the plain object to a Firestore Timestamp
+      const timestamp = new Timestamp(
+        timestampData.seconds,
+        timestampData.nanoseconds
+      );
+      console.log("Created Timestamp:", timestamp);
+      const date = timestamp.toDate();
+      console.log("Converted to Date:", date);
+
+      const formatted = date.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "numeric",
+        hour12: true,
+      });
+      console.log("Formatted date:", formatted);
+      return formatted;
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "-";
+    }
   };
 
   return (
@@ -523,63 +621,25 @@ const DashboardGrid = () => {
               <p className="text-sm mb-2 text-gray-600">{status[group]}</p>
             )}
             <div className="bg-white shadow-sm rounded-lg overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
-                      ETF Details
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
-                      Frequency
-                    </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
-                      Price Info
-                    </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
-                      Latest Distribution
-                    </th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">
-                      Annual Yield
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {groupedETFs[group].map((etf) => renderETFRow(etf))}
-                </tbody>
-              </table>
+              <TableContainer component={Paper}>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>ETF Details</TableCell>
+                      <TableCell>Frequency</TableCell>
+                      <TableCell>Price Info</TableCell>
+                      <TableCell>Latest Distribution</TableCell>
+                      <TableCell>Annual Yield</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {groupedETFs[group].map((etf) => renderETFRow(etf))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </div>
           </div>
         ))}
-
-      <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg shadow-md p-6">
-        <h3 className="text-xl font-bold mb-2">Portfolio Total</h3>
-        <p className="text-3xl font-semibold">
-          {formatCurrency(calculateTotal())}
-        </p>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          gap: "1rem",
-          padding: "1rem",
-        }}
-      >
-        {["JEPI", "JEPQ", "SCHD"].map((symbol) => (
-          <Card key={symbol} style={{ padding: "1rem" }}>
-            <Typography variant="h5">{symbol}</Typography>
-            <Typography variant="h4">
-              {formatPrice(prices[symbol]?.price)}
-            </Typography>
-            <Typography variant="caption">
-              Last Updated: {formatDate(prices[symbol]?.lastUpdated)}
-            </Typography>
-          </Card>
-        ))}
-      </div>
     </div>
   );
-};
-
-export default DashboardGrid;
+}
