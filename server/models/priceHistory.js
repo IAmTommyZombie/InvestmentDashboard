@@ -1,24 +1,30 @@
-const mongoose = require("mongoose");
+const admin = require("firebase-admin");
 
-const priceHistorySchema = new mongoose.Schema({
-  ticker: {
-    type: String,
-    required: true,
-    uppercase: true,
-  },
-  price: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  timestamp: {
-    type: Date,
-    required: true,
-    default: Date.now,
-  },
-});
+function initPriceHistory(db) {
+  return {
+    async create(data) {
+      const { symbol, price, date } = data;
+      const docRef = db.collection("priceHistory").doc();
+      await docRef.set({
+        symbol,
+        price,
+        date: date || new Date(),
+      });
+      return data;
+    },
 
-// Create an index for faster queries
-priceHistorySchema.index({ ticker: 1, timestamp: -1 });
+    async find(filter) {
+      const { symbol } = filter;
+      const snapshot = await db
+        .collection("priceHistory")
+        .where("symbol", "==", symbol)
+        .orderBy("date", "desc")
+        .limit(30)
+        .get();
 
-module.exports = mongoose.model("PriceHistory", priceHistorySchema);
+      return snapshot.docs.map((doc) => doc.data());
+    },
+  };
+}
+
+module.exports = initPriceHistory;

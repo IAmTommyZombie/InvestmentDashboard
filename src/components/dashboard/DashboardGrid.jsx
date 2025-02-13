@@ -9,7 +9,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { usePortfolio } from "../../context/PortfolioContext";
-import { useDistributions } from "../../context/DistributionContext";
+import { useDistribution } from "../../context/DistributionContext";
 import { PieChart, BarChart3, DollarSign } from "lucide-react";
 import {
   ETF_DATA,
@@ -18,6 +18,7 @@ import {
   getETFStatus,
 } from "../../data/etfMetadata";
 import { formatCurrency } from "../../utils/formatters";
+import { Card, Typography } from "@mui/material";
 
 const FALLBACK_PRICES = {
   YMAG: { price: 18.0, quantity: 100 },
@@ -63,7 +64,7 @@ const DashboardGrid = () => {
     getPaymentsPerYear,
     distributions = {},
     loading,
-  } = useDistributions() || {};
+  } = useDistribution() || {};
   const [prices, setPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(true);
   const [updatingETFs, setUpdatingETFs] = useState({});
@@ -381,6 +382,17 @@ const DashboardGrid = () => {
     }, 0);
   };
 
+  const formatPrice = (price) => {
+    return price ? `$${price.toFixed(2)}` : "Loading...";
+  };
+
+  const formatDate = (timestamp) => {
+    if (!timestamp) return "N/A";
+    // Convert Firebase timestamp to JavaScript Date
+    const date = new Date(timestamp._seconds * 1000);
+    return date.toLocaleString();
+  };
+
   return (
     <div className="space-y-8 p-4">
       {window.location.hostname === "iamtommyzombie.github.io" && (
@@ -544,6 +556,27 @@ const DashboardGrid = () => {
         <p className="text-3xl font-semibold">
           {formatCurrency(calculateTotal())}
         </p>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: "1rem",
+          padding: "1rem",
+        }}
+      >
+        {["JEPI", "JEPQ", "SCHD"].map((symbol) => (
+          <Card key={symbol} style={{ padding: "1rem" }}>
+            <Typography variant="h5">{symbol}</Typography>
+            <Typography variant="h4">
+              {formatPrice(prices[symbol]?.price)}
+            </Typography>
+            <Typography variant="caption">
+              Last Updated: {formatDate(prices[symbol]?.lastUpdated)}
+            </Typography>
+          </Card>
+        ))}
       </div>
     </div>
   );

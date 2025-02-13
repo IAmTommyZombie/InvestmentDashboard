@@ -1,13 +1,13 @@
-name: Update Prices
+name: Update ETF Prices
+
 on:
-  repository_dispatch:
-    types: [update-prices]
-  workflow_dispatch: # Allows manual triggering from GitHub UI
+  schedule:
+    - cron: "*/5 * * * *" # Runs every 5 minutes
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
-  update:
+  update-prices:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v2
 
@@ -16,29 +16,14 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Playwright
-        run: npx playwright install chromium --with-deps
-
-      - name: Run price updates
-        id: update-prices
+      - name: Install Dependencies
         run: |
-          echo "::group::Running price updates"
-          node server/scripts/scraper.js
-          echo "::endgroup::"
-          echo "update_status=completed" >> $GITHUB_OUTPUT
+          cd server
+          npm install
+
+      - name: Update Prices
         env:
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          DEBUG: pw:api*
-
-      - name: Update completion status
-        if: always()
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          if [ "${{ steps.update-prices.outcome }}" == "success" ]; then
-            echo "Price updates completed successfully"
-          else
-            echo "Price updates failed"
-            exit 1
-          fi
+          cd server
+          node scripts/update-prices.js

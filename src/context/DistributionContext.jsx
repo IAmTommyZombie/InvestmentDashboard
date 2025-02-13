@@ -38,9 +38,20 @@ const THIRTEEN_X_ETFS = [
   "AIYY",
 ];
 
-export const DistributionProvider = ({ children }) => {
+export function useDistribution() {
+  const context = useContext(DistributionContext);
+  if (!context) {
+    throw new Error(
+      "useDistribution must be used within a DistributionProvider"
+    );
+  }
+  return context;
+}
+
+export function DistributionProvider({ children }) {
   const [distributions, setDistributions] = useState({});
   const [loading, setLoading] = useState(true);
+  const [monthlyDistribution, setMonthlyDistribution] = useState(0);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -88,18 +99,18 @@ export const DistributionProvider = ({ children }) => {
     return value === "TBD" ? "TBD" : value;
   };
 
+  const value = {
+    distributions,
+    loading,
+    getLatestDistribution,
+    getPaymentsPerYear,
+    monthlyDistribution,
+    setMonthlyDistribution,
+  };
+
   return (
-    <DistributionContext.Provider
-      value={{
-        distributions,
-        loading,
-        getLatestDistribution,
-        getPaymentsPerYear,
-      }}
-    >
+    <DistributionContext.Provider value={value}>
       {children}
     </DistributionContext.Provider>
   );
-};
-
-export const useDistributions = () => useContext(DistributionContext);
+}

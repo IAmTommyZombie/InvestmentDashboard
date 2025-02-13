@@ -12,7 +12,18 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import AddETFForm from "./AddETFForm";
-import { useDistributions } from "../../context/DistributionContext";
+import { useDistribution } from "../../context/DistributionContext";
+import { usePortfolio } from "../../context/PortfolioContext";
+import { useDistribution as useDistributionContext } from "../../context/DistributionContext";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+} from "@mui/material";
 
 const getGroupStyle = (group) => {
   switch (group) {
@@ -86,6 +97,8 @@ const getNextDistributionDate = (group) => {
 };
 
 const PortfolioView = () => {
+  const { portfolio } = usePortfolio();
+  const { monthlyDistribution } = useDistributionContext();
   const [etfs, setEtfs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -294,10 +307,8 @@ const PortfolioView = () => {
   };
 
   // Calculate total value
-  const calculateTotalValue = () => {
-    return etfs.reduce((total, etf) => {
-      return total + etf.totalShares * (etf.currentPrice || 0);
-    }, 0);
+  const calculateTotalValue = (shares, price) => {
+    return shares * price;
   };
 
   const calculateBreakEven = (etf) => {
@@ -461,42 +472,34 @@ const PortfolioView = () => {
 
           {/* Purchase History Table */}
           <div className="mb-6">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Shares
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Price
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {selectedEtf.purchases?.map((purchase, index) => (
-                  <tr key={index}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {purchase.date}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {purchase.shares}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      ${purchase.price.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      ${(purchase.shares * purchase.price).toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell align="right">Shares</TableCell>
+                    <TableCell align="right">Price</TableCell>
+                    <TableCell align="right">Total</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {selectedEtf.purchases?.map((purchase, index) => (
+                    <TableRow key={index}>
+                      <TableCell component="th" scope="row">
+                        {purchase.date}
+                      </TableCell>
+                      <TableCell align="right">{purchase.shares}</TableCell>
+                      <TableCell align="right">
+                        ${purchase.price.toFixed(2)}
+                      </TableCell>
+                      <TableCell align="right">
+                        ${(purchase.shares * purchase.price).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </div>
 
           {/* Add New Purchase Form */}
@@ -571,7 +574,10 @@ const PortfolioView = () => {
   if (error) return <div>Error: {error}</div>;
 
   const monthlyGroups = groupEtfsByMonth();
-  const totalValue = calculateTotalValue();
+  const totalValue = calculateTotalValue(
+    etfs.reduce((sum, etf) => sum + etf.totalShares, 0),
+    etfs.reduce((sum, etf) => sum + etf.currentPrice, 0)
+  );
   const stats = calculateStats();
 
   const sortedEtfs = sortData(etfs);
@@ -586,7 +592,7 @@ const PortfolioView = () => {
           </h3>
           <p className="text-2xl font-semibold">
             $
-            {stats.totalValue.toLocaleString(undefined, {
+            {totalValue.toLocaleString(undefined, {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -657,148 +663,38 @@ const PortfolioView = () => {
           <h3 className="text-lg font-medium">Holdings</h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("ticker")}
-                >
-                  ETF {getSortIcon("ticker")}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("group")}
-                >
-                  Group {getSortIcon("group")}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("shares")}
-                >
-                  Shares {getSortIcon("shares")}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("value")}
-                >
-                  Value {getSortIcon("value")}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("monthlyIncome")}
-                >
-                  Monthly Income {getSortIcon("monthlyIncome")}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => requestSort("breakEven")}
-                >
-                  Break Even {getSortIcon("breakEven")}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sortedEtfs.map((etf) => {
-                const breakEven = calculateBreakEven(etf);
-
-                return (
-                  <tr key={etf.id} className={getGroupStyle(etf.group)}>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium">
-                      {etf.ticker}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {formatGroupName(etf.group)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {etf.totalShares}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Symbol</TableCell>
+                  <TableCell align="right">Shares</TableCell>
+                  <TableCell align="right">Price</TableCell>
+                  <TableCell align="right">Total Value</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {portfolio.map((holding) => (
+                  <TableRow key={holding.symbol}>
+                    <TableCell component="th" scope="row">
+                      {holding.symbol}
+                    </TableCell>
+                    <TableCell align="right">{holding.shares}</TableCell>
+                    <TableCell align="right">
+                      ${holding.price?.toFixed(2) || "N/A"}
+                    </TableCell>
+                    <TableCell align="right">
                       $
-                      {(
-                        etf.totalShares * (etf.currentPrice || 0)
-                      ).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {breakEven === "TBD" ? (
-                        "TBD"
-                      ) : (
-                        <div className="space-y-1">
-                          <div className="text-xs text-gray-500">
-                            Investment: $
-                            {breakEven.totalInvestment.toLocaleString(
-                              undefined,
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            Received: $
-                            {breakEven.totalDistributions.toLocaleString(
-                              undefined,
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }
-                            )}
-                          </div>
-                          <div className="text-xs text-green-600">
-                            {breakEven.years < 1
-                              ? `${Math.ceil(breakEven.months)} months`
-                              : `${breakEven.years.toFixed(1)} years`}
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-green-600">
-                      {etf.monthlyIncome === "TBD"
-                        ? "TBD"
-                        : `$${etf.monthlyIncome.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedEtf(etf);
-                            setShowPurchaseHistory(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="View Purchase History"
-                        >
-                          <Calendar className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Are you sure you want to delete ${etf.ticker}?`
-                              )
-                            ) {
-                              deleteDoc(doc(db, "etfs", etf.id));
-                            }
-                          }}
-                          className="text-red-600 hover:text-red-900"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      {calculateTotalValue(
+                        holding.shares,
+                        holding.price
+                      )?.toFixed(2) || "N/A"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </div>
       </div>
 
@@ -809,93 +705,36 @@ const PortfolioView = () => {
             <h3 className="text-lg font-medium">{month}</h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                    onClick={() => requestSort("ticker")}
-                  >
-                    ETF {getSortIcon("ticker")}
-                  </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                    onClick={() => requestSort("group")}
-                  >
-                    Group {getSortIcon("group")}
-                  </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                    onClick={() => requestSort("shares")}
-                  >
-                    Shares {getSortIcon("shares")}
-                  </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                    onClick={() => requestSort("value")}
-                  >
-                    Value {getSortIcon("value")}
-                  </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                    onClick={() => requestSort("monthlyIncome")}
-                  >
-                    Monthly Income {getSortIcon("monthlyIncome")}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {sortData(monthlyEtfs).map((etf) => (
-                  <tr key={etf.id} className={getGroupStyle(etf.group)}>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium">
-                      {etf.ticker}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {formatGroupName(etf.group)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {etf.totalShares}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      $
-                      {(
-                        etf.totalShares * (etf.currentPrice || 0)
-                      ).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-green-600">
-                      {etf.monthlyIncome === "TBD"
-                        ? "TBD"
-                        : `$${etf.monthlyIncome.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <button
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Are you sure you want to delete ${etf.ticker}?`
-                            )
-                          ) {
-                            deleteDoc(doc(db, "etfs", etf.id));
-                          }
-                        }}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Symbol</TableCell>
+                    <TableCell align="right">Shares</TableCell>
+                    <TableCell align="right">Price</TableCell>
+                    <TableCell align="right">Total Value</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {monthlyEtfs.map((etf) => (
+                    <TableRow key={etf.ticker}>
+                      <TableCell component="th" scope="row">
+                        {etf.ticker}
+                      </TableCell>
+                      <TableCell align="right">{etf.totalShares}</TableCell>
+                      <TableCell align="right">
+                        ${etf.currentPrice?.toFixed(2) || "N/A"}
+                      </TableCell>
+                      <TableCell align="right">
+                        $
+                        {(etf.totalShares * etf.currentPrice).toFixed(2) ||
+                          "N/A"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </div>
         </div>
       ))}

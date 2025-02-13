@@ -1,30 +1,61 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
-const ETF = require("./models/etf");
-const PriceHistory = require("./models/priceHistory");
+const admin = require("firebase-admin");
+const initETF = require("./models/etf");
+const initPriceHistory = require("./models/priceHistory");
 const priceService = require("./services/priceService");
-const { scrapePriceForTicker } = require("./scripts/scraper");
+const { scrapePriceForTicker, updatePrices } = require("./scripts/scraper");
+
+// Initialize Firebase first
+const serviceAccount = require("./service-account-key.json");
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// Then initialize the database and ETF model
+const db = admin.firestore();
+const ETF = initETF(db);
+const PriceHistory = initPriceHistory(db);
 
 // Initialize express
 const app = express();
 
 // Middleware
-app.use(
-  cors({
-    origin: "http://localhost:5173", // Your Vite dev server URL
-  })
-);
+app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
-mongoose
-  .connect("mongodb://localhost:27017/portfolio")
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => {
-    console.error("MongoDB connection error:", err);
-    process.exit(1);
-  });
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Test Firebase connection
+app.get("/test-firebase", async (req, res) => {
+  try {
+    await db.collection("etfs").doc("test").set({
+      test: "Hello Firebase!",
+    });
+    res.json({ status: "Firebase connection successful" });
+  } catch (error) {
+    console.error("Firebase Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add this new endpoint to check stored data
+app.get("/check-prices", async (req, res) => {
+  try {
+    const snapshot = await db.collection("etfs").get();
+    const prices = {};
+    snapshot.forEach((doc) => {
+      prices[doc.id] = doc.data();
+    });
+    res.json(prices);
+  } catch (error) {
+    console.error("Error checking prices:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ETF Routes
 app.get("/api/etfs", async (req, res) => {
@@ -219,8 +250,19 @@ app.post("/scrape-price", async (req, res) => {
   }
 });
 
+// Update prices endpoint
+app.get("/update-prices", async (req, res) => {
+  try {
+    await updatePrices(ETF, PriceHistory);
+    res.json({ status: "Prices updated successfully" });
+  } catch (error) {
+    console.error("Error updating prices:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
