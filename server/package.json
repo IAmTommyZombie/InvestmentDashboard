@@ -3,16 +3,18 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "update-prices": "node scripts/update-prices.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "4.18.2",
-    "cors": "2.8.5",
-    "firebase-admin": "11.11.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "firebase-admin": "^11.11.0",
+    "whatwg-url": "^14.0.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
   },
   "description": "",
   "engines": {
