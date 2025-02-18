@@ -3,6 +3,9 @@ import { db } from "../../firebase/config";
 import { collection, addDoc, onSnapshot } from "firebase/firestore";
 import { availableETFs } from "../../data/availableETFs";
 import { X, ChevronDown } from "lucide-react";
+import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 // Add the ETF_GROUPS constant at the top
 const ETF_GROUPS = {
@@ -31,6 +34,11 @@ const GROUP_NAMES = {
   GROUP_C: "Group C - Monthly",
   GROUP_D: "Group D - Monthly",
 };
+
+const client = new DynamoDBClient({
+  region: "us-east-2",
+});
+const docClient = DynamoDBDocumentClient.from(client);
 
 const AddETFForm = ({ onClose }) => {
   const [formData, setFormData] = useState({
@@ -112,8 +120,6 @@ const AddETFForm = ({ onClose }) => {
     e.preventDefault();
 
     try {
-      const etfsRef = collection(db, "etfs");
-
       const totalShares = Number(formData.totalShares);
       if (isNaN(totalShares)) {
         throw new Error("Shares must be a valid number");
@@ -128,12 +134,12 @@ const AddETFForm = ({ onClose }) => {
       const distribution = getCurrentDistribution(formData.ticker);
       console.log("Distribution for", formData.ticker, ":", distribution);
 
-      const newETF = {
-        ...formData,
-        totalShares,
-        createdAt: new Date(),
+      // Create the ETF item
+      const etfItem = {
         ticker: formData.ticker.toUpperCase(),
-        distribution, // Add the distribution amount
+        totalShares,
+        purchaseDate: formData.purchaseDate,
+        distribution,
         purchases: [
           {
             date: formData.purchaseDate,
@@ -141,15 +147,27 @@ const AddETFForm = ({ onClose }) => {
             price: Number(currentPrice),
           },
         ],
+        createdAt: new Date().toISOString(),
       };
 
-      console.log("Saving ETF document:", newETF);
+      // Add to DynamoDB
+      await docClient.send(
+        new PutCommand({
+          TableName: "etfs",
+          Item: etfItem,
+        })
+      );
 
-      await addDoc(etfsRef, newETF);
+      // Clear form and close
+      setFormData({
+        ticker: "",
+        totalShares: "",
+        purchaseDate: new Date().toISOString().split("T")[0],
+      });
       onClose();
     } catch (error) {
       console.error("Error adding ETF:", error);
-      alert("Failed to add ETF: " + error.message);
+      alert("Error adding ETF");
     }
   };
 

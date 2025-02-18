@@ -9,9 +9,15 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "test-db": "node src/utils/testDb.js",
+    "migrate": "node src/utils/testMigration.js"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity": "^3.744.0",
+    "@aws-sdk/client-dynamodb": "^3.744.0",
+    "@aws-sdk/credential-providers": "^3.744.0",
+    "@aws-sdk/lib-dynamodb": "^3.744.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@mui/material": "^6.4.4",

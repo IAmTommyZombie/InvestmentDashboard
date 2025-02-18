@@ -31,6 +31,9 @@ import {
   Paper,
   Grid,
 } from "@mui/material";
+import UpdatePriceButton from "../common/UpdatePriceButton";
+import { updateMultiplePrices } from "../../services/priceService";
+import { getDashboardData } from "../../services/dashboardService";
 
 const FALLBACK_PRICES = {
   YMAG: { price: 18.0, quantity: 100 },
@@ -107,7 +110,13 @@ const getGroupColor = (ticker) => {
   return "bg-white hover:bg-gray-50";
 };
 
-export default function DashboardGrid() {
+const DashboardGrid = () => {
+  const [dashboardData, setDashboardData] = useState({
+    etfs: [],
+    prices: {},
+    distributions: {},
+  });
+  const [loading, setLoading] = useState(true);
   const {
     etfs = [],
     totalValue = 0,
@@ -118,7 +127,7 @@ export default function DashboardGrid() {
     getLatestDistribution,
     getPaymentsPerYear,
     distributions = {},
-    loading,
+    loading: distributionLoading,
     monthlyDistribution,
   } = useDistribution() || {};
   const [prices, setPrices] = useState({});
@@ -128,6 +137,30 @@ export default function DashboardGrid() {
   const [lastUpdateTime, setLastUpdateTime] = useState({});
   const [priceChanges, setPriceChanges] = useState({});
   const [groupProgress, setGroupProgress] = useState({});
+  const [updateStatus, setUpdateStatus] = useState({});
+  const [updateProgress, setUpdateProgress] = useState({});
+
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      try {
+        setLoading(true);
+        const data = await getDashboardData();
+        setDashboardData(data);
+      } catch (error) {
+        console.error("Error loading dashboard data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Initial load
+    loadDashboardData();
+
+    // Poll for updates
+    const interval = setInterval(loadDashboardData, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     console.log("Setting up price listener");
@@ -154,6 +187,20 @@ export default function DashboardGrid() {
 
     return () => unsubscribe();
   }, []); // Only run once on mount
+
+  useEffect(() => {
+    // Test connection
+    const testConnection = async () => {
+      try {
+        const data = await getDashboardData();
+        console.log("Successfully connected to DynamoDB!", data);
+      } catch (error) {
+        console.error("DynamoDB connection test failed:", error);
+      }
+    };
+
+    testConnection();
+  }, []);
 
   const updateSingleETF = async (ticker) => {
     if (!ticker) return;
@@ -335,7 +382,6 @@ export default function DashboardGrid() {
 
     const isHeld = !!portfolioEntry;
 
-    // Get the group color
     const getGroupBackgroundColor = (ticker) => {
       if (ETF_GROUPS.WEEKLY.includes(ticker)) return "bg-gray-50";
       if (ETF_GROUPS.GROUP_A.includes(ticker)) return "bg-green-50";
@@ -351,7 +397,6 @@ export default function DashboardGrid() {
     } transition-colors`;
 
     const currentPrice = prices[etf.ticker]?.price;
-    console.log(`Rendering ${etf.ticker} with price:`, currentPrice);
 
     return (
       <TableRow key={etf.ticker} className={rowClassName}>
@@ -370,11 +415,6 @@ export default function DashboardGrid() {
             <span className="font-medium text-gray-900">
               {currentPrice ? formatCurrency(currentPrice) : "Loading..."}
             </span>
-            {status[etf.ticker] && (
-              <span className="text-sm text-gray-500">
-                {status[etf.ticker]}
-              </span>
-            )}
           </div>
         </TableCell>
         <TableCell className="px-4 py-3 text-right">
@@ -402,47 +442,73 @@ export default function DashboardGrid() {
     );
   };
 
+  const updateAllPrices = async () => {
+    const allTickers = Object.keys(ETF_DATA);
+    setUpdateProgress({
+      all: { current: 0, total: allTickers.length },
+    });
+    setUpdateStatus({ all: "Updating all ETFs..." });
+
+    try {
+      for (let i = 0; i < allTickers.length; i++) {
+        await updateMultiplePrices([allTickers[i]]);
+        setUpdateProgress((prev) => ({
+          all: { current: i + 1, total: allTickers.length },
+        }));
+      }
+      setUpdateStatus({ all: "✅ All ETFs updated!" });
+    } catch (error) {
+      setUpdateStatus({ all: "❌ Update failed" });
+    }
+
+    // Clear status after 3 seconds
+    setTimeout(() => {
+      setUpdateStatus({});
+      setUpdateProgress({});
+    }, 3000);
+  };
+
   const updateGroupETFs = async (group) => {
-    const etfsInGroup = Object.entries(ETF_DATA)
+    const groupTickers = Object.entries(ETF_DATA)
       .filter(([_, data]) => data.group === group)
       .map(([ticker]) => ticker);
 
-    const totalETFs = etfsInGroup.length;
-    setGroupProgress((prev) => ({
-      ...prev,
-      [group]: { current: 0, total: totalETFs, currentTicker: etfsInGroup[0] },
-    }));
+    setUpdateProgress({
+      [group]: { current: 0, total: groupTickers.length },
+    });
+    setUpdateStatus({ [group]: `Updating ${group}...` });
 
-    for (let i = 0; i < etfsInGroup.length; i++) {
-      const ticker = etfsInGroup[i];
-      setGroupProgress((prev) => ({
-        ...prev,
-        [group]: {
-          current: i,
-          total: totalETFs,
-          currentTicker: ticker,
-        },
-      }));
-      await updateSingleETF(ticker);
-      setGroupProgress((prev) => ({
-        ...prev,
-        [group]: {
-          current: i + 1,
-          total: totalETFs,
-          currentTicker: i < totalETFs - 1 ? etfsInGroup[i + 1] : null,
-        },
-      }));
+    try {
+      for (let i = 0; i < groupTickers.length; i++) {
+        await updateMultiplePrices([groupTickers[i]]);
+        setUpdateProgress((prev) => ({
+          [group]: { current: i + 1, total: groupTickers.length },
+        }));
+      }
+      setUpdateStatus({ [group]: `✅ ${group} updated!` });
+    } catch (error) {
+      setUpdateStatus({ [group]: "❌ Update failed" });
     }
 
-    setStatus((prev) => ({ ...prev, [group]: "✅ Group updated!" }));
+    // Clear status after 3 seconds
     setTimeout(() => {
-      setStatus((prev) => ({ ...prev, [group]: null }));
-      setGroupProgress((prev) => {
-        const newProgress = { ...prev };
-        delete newProgress[group];
-        return newProgress;
-      });
+      setUpdateStatus((prev) => ({ ...prev, [group]: null }));
+      setUpdateProgress((prev) => ({ ...prev, [group]: null }));
     }, 3000);
+  };
+
+  const ProgressBar = ({ progress }) => {
+    if (!progress) return null;
+    const percentage = (progress.current / progress.total) * 100;
+
+    return (
+      <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-blue-600 transition-all duration-200"
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    );
   };
 
   const calculateTotal = () => {
@@ -564,6 +630,30 @@ export default function DashboardGrid() {
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <div className="flex items-center gap-4">
+          {updateProgress.all && (
+            <div className="w-64">
+              <ProgressBar progress={updateProgress.all} />
+              <div className="text-sm text-gray-600 mt-1">
+                {updateProgress.all.current} / {updateProgress.all.total} ETFs
+              </div>
+            </div>
+          )}
+          <button
+            onClick={updateAllPrices}
+            disabled={Object.keys(updateProgress).length > 0}
+            className={`px-4 py-2 rounded-md text-sm font-medium ${
+              Object.keys(updateProgress).length > 0
+                ? "bg-gray-300 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
+            }`}
+          >
+            {updateStatus.all || "Update All ETFs"}
+          </button>
+        </div>
+      </div>
+
       {Object.keys(groupedETFs)
         .sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b))
         .map((group) => (
@@ -571,49 +661,25 @@ export default function DashboardGrid() {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">{group}</h2>
               <div className="flex items-center gap-4">
-                {groupProgress[group] && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 transition-all duration-200"
-                        style={{
-                          width: `${
-                            (groupProgress[group].current /
-                              groupProgress[group].total) *
-                            100
-                          }%`,
-                        }}
-                      />
+                {updateProgress[group] && (
+                  <div className="w-64">
+                    <ProgressBar progress={updateProgress[group]} />
+                    <div className="text-sm text-gray-600 mt-1">
+                      {updateProgress[group].current} /{" "}
+                      {updateProgress[group].total} ETFs
                     </div>
-                    <span className="text-sm text-gray-600">
-                      {groupProgress[group].currentTicker ? (
-                        <>
-                          Updating {groupProgress[group].currentTicker}
-                          <span className="ml-2 text-gray-400">
-                            ({groupProgress[group].current}/
-                            {groupProgress[group].total})
-                          </span>
-                        </>
-                      ) : (
-                        `${groupProgress[group].current}/${groupProgress[group].total}`
-                      )}
-                    </span>
                   </div>
                 )}
                 <button
                   onClick={() => updateGroupETFs(group)}
-                  disabled={groupProgress[group]}
+                  disabled={Object.keys(updateProgress).length > 0}
                   className={`px-3 py-1 rounded-md text-sm ${
-                    groupProgress[group]
+                    Object.keys(updateProgress).length > 0
                       ? "bg-gray-300 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 text-white"
                   }`}
                 >
-                  {window.location.hostname === "iamtommyzombie.github.io"
-                    ? "Demo Mode"
-                    : groupProgress[group]
-                    ? "Updating..."
-                    : "Update Group"}
+                  {updateStatus[group] || "Update Group"}
                 </button>
               </div>
             </div>
@@ -642,4 +708,6 @@ export default function DashboardGrid() {
         ))}
     </div>
   );
-}
+};
+
+export default DashboardGrid;

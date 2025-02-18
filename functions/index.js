@@ -8,101 +8,39 @@
  */
 
 const functions = require("firebase-functions");
-const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
-const { chromium } = require("playwright");
+const fetch = require("node-fetch");
+const cors = require("cors")({ origin: true });
 
-// Initialize Firebase Admin
-initializeApp();
-const db = getFirestore();
+// Create and deploy your first functions
+// https://firebase.google.com/docs/functions/get-started
 
-// Price update function
-async function updatePrices() {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox"],
-  });
+// exports.helloWorld = onRequest((request, response) => {
+//   logger.info("Hello logs!", {structuredData: true});
+//   response.send("Hello from Firebase!");
+// });
 
-  try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
+exports.scrapePrices = functions.https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    try {
+      const { ticker } = request.body;
 
-    // List of ETFs to update
-    const etfs = [
-      "YMAG",
-      "YMAX",
-      "LFGY",
-      "GPTY", // WEEKLY
-      "TSLY",
-      "GOOY",
-      "YBIT",
-      "OARK", // GROUP A
-      "NVDY",
-      "FBY",
-      "GDXY",
-      "JPMO", // GROUP B
-      "CONY",
-      "MSFO",
-      "AMDY",
-      "NFLY", // GROUP C
-      "MSTY",
-      "AMZY",
-      "APLY",
-      "DISO", // GROUP D
-    ];
+      // Call the scraper service
+      const scraperResponse = await fetch(
+        "https://investment-dashboard-scraper.onrender.com/scrape-price",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ticker }),
+        }
+      );
 
-    for (const ticker of etfs) {
-      try {
-        // Navigate to Yahoo Finance
-        await page.goto(`https://finance.yahoo.com/quote/${ticker}`);
-
-        // Wait for price element
-        const priceElement = await page.waitForSelector(
-          '[data-test="qsp-price"]'
-        );
-        const price = await priceElement.textContent();
-
-        // Update price in Firebase
-        await db
-          .collection("prices")
-          .doc(ticker)
-          .set({
-            currentPrice: parseFloat(price),
-            lastUpdated: new Date().toISOString(),
-            source: "yahoo",
-          });
-
-        console.log(`Updated ${ticker}: $${price}`);
-
-        // Wait between requests to avoid rate limiting
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      } catch (error) {
-        console.error(`Error updating ${ticker}:`, error);
-      }
+      const data = await scraperResponse.json();
+      response.json(data);
+    } catch (error) {
+      console.error("Error in scrapePrices:", error);
+      response.status(500).json({ error: error.message });
     }
-  } finally {
-    await browser.close();
-  }
-}
-
-// Schedule updates for market open (9:31 AM ET) and close (4:01 PM ET)
-exports.scheduledPriceUpdates = functions.pubsub
-  .schedule("31 9,16 * * 1-5")
-  .timeZone("America/New_York")
-  .onRun(async (context) => {
-    console.log("Starting scheduled price update...");
-    await updatePrices();
-    return null;
   });
-
-// Manual trigger endpoint
-exports.manualPriceUpdate = functions.https.onRequest(async (req, res) => {
-  try {
-    console.log("Starting manual price update...");
-    await updatePrices();
-    res.json({ success: true, message: "Prices updated successfully" });
-  } catch (error) {
-    console.error("Manual update failed:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
 });

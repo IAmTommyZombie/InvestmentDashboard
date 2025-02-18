@@ -25,6 +25,11 @@ import {
   Paper,
 } from "@mui/material";
 import { formatCurrency } from "../../utils/formatters";
+import {
+  getPrices,
+  getDistributions,
+  deleteEtf,
+} from "../../services/dynamoService";
 
 // Define ETF groups
 const ETF_GROUPS = {
@@ -151,44 +156,43 @@ const PortfolioView = () => {
   ];
 
   useEffect(() => {
-    console.log("Setting up price listener");
+    console.log("Setting up data listeners");
     setPricesLoading(true);
 
-    const priceUnsubscribe = onSnapshot(
-      collection(db, "prices"),
-      (snapshot) => {
-        const priceData = {};
-        console.log(
-          "Raw snapshot data:",
-          snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() }))
-        );
-
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          console.log(`Processing doc ${doc.id}:`, data);
-          priceData[doc.id] = data;
-        });
-
+    // Function to load prices
+    const loadPrices = async () => {
+      try {
+        const priceData = await getPrices();
         console.log("Final price data:", priceData);
         setPrices(priceData);
+      } catch (error) {
+        console.error("Error loading prices:", error);
+      } finally {
         setPricesLoading(false);
       }
-    );
+    };
 
-    const distributionUnsubscribe = onSnapshot(
-      collection(db, "distributions"),
-      (snapshot) => {
-        const distData = {};
-        snapshot.forEach((doc) => {
-          distData[doc.id] = doc.data();
-        });
+    // Function to load distributions
+    const loadDistributions = async () => {
+      try {
+        const distData = await getDistributions();
         setDistributions(distData);
+      } catch (error) {
+        console.error("Error loading distributions:", error);
       }
-    );
+    };
+
+    // Initial load
+    loadPrices();
+    loadDistributions();
+
+    // Set up polling for updates (since DynamoDB doesn't have real-time listeners)
+    const priceInterval = setInterval(loadPrices, 60000); // Poll every minute
+    const distInterval = setInterval(loadDistributions, 60000);
 
     return () => {
-      priceUnsubscribe();
-      distributionUnsubscribe();
+      clearInterval(priceInterval);
+      clearInterval(distInterval);
     };
   }, []);
 
@@ -528,7 +532,7 @@ const PortfolioView = () => {
     }
 
     try {
-      await deleteDoc(doc(db, "etfs", etfId));
+      await deleteEtf(etfId);
       if (selectedEtf?.id === etfId) {
         setSelectedEtf(null);
       }
@@ -756,19 +760,12 @@ const PortfolioView = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {formatCurrency(cumulativeTotals.value)}
-                          <div className="text-xs text-gray-500">
-                            (This month: {formatCurrency(monthTotals.value)})
-                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           -
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {formatCurrency(cumulativeTotals.monthlyIncome)}
-                          <div className="text-xs text-gray-500">
-                            (This month:{" "}
-                            {formatCurrency(monthTotals.monthlyIncome)})
-                          </div>
                         </td>
                       </tr>
                     </tbody>
